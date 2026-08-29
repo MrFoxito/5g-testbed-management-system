@@ -1,0 +1,22 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      EMS_EXECUTION_MODE: simulated
+      EMS_SECRET_KEY: local-compose-key-change-before-sharing
+      EMS_DATABASE_PATH: /app/data/ems.db
+      EMS_CAPTURE_DIR: /app/data/captures
+      EMS_BACKUP_DIR: /app/data/backups
+      EMS_ALLOWED_CONFIG_ROOTS: '["/app/data/testbed-config"]'
+      EMS_ALLOWED_INTERFACES: '["lo","ogstun"]'
+    volumes:
+      - ems-data:/app/data
+    ports:
+      - "8000:8000"
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports:
+      - "8080:80"
+volumes:
+  ems-data:

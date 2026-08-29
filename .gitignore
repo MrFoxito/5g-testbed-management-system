@@ -1,0 +1,26 @@
+# Environments & Dependencies
+backend/.venv/
+backend/.env
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend dependencies & build
+frontend/node_modules/
+frontend/dist/
+frontend/.tanstack/
+
+# Python Cache
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+
+# Captures & Logs
+*.pcap
+*.log
+data/captures/
+data/backups/
