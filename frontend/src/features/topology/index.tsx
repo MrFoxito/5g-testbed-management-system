@@ -44,7 +44,7 @@ export function TopologyPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className='h-[calc(100%-5rem)]'>
-          <EmsTopology components={query.data?.components ?? []} />
+          <EmsTopology scenarioId={scenario} components={query.data?.components ?? []} />
         </CardContent>
       </Card>
     </EmsPage>

@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from 'react'
+import { useEffect, useState, useCallback, type CSSProperties } from 'react'
 import {
   Background,
   Controls,
@@ -10,7 +10,8 @@ import {
   type Node,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { ComponentStatus } from '@/lib/api'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { api, type ComponentStatus } from '@/lib/api'
 
 // Fallback layout columns
 const columns: Record<string, number> = {
@@ -72,9 +73,63 @@ const getInterfaceLabel = (sourceId: string, targetId: string) => {
   return interfaceMap[pair]
 }
 
-export function EmsTopology({ components }: { components: ComponentStatus[] }) {
+type MenuState = {
+  id: string
+  status: string
+  top?: number
+  left?: number
+  right?: number
+  bottom?: number
+}
+
+export function EmsTopology({ scenarioId, components }: { scenarioId: string; components: ComponentStatus[] }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  
+  const queryClient = useQueryClient()
+  const [menu, setMenu] = useState<MenuState | null>(null)
+
+  const startMutation = useMutation({
+    mutationFn: (componentId: string) => api.post(`/scenarios/${scenarioId}/components/${componentId}/start`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status', scenarioId] })
+      setMenu(null)
+    },
+  })
+
+  const stopMutation = useMutation({
+    mutationFn: (componentId: string) => api.post(`/scenarios/${scenarioId}/components/${componentId}/stop`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['status', scenarioId] })
+      setMenu(null)
+    },
+  })
+
+  const onNodeContextMenu = useCallback(
+    (event: React.MouseEvent, node: Node) => {
+      event.preventDefault()
+      
+      const pane = (event.target as Element).closest('.react-flow')
+      if (!pane) return
+      
+      const bounds = pane.getBoundingClientRect()
+      
+      const isBottom = event.clientY > bounds.bottom - 200
+      const isRight = event.clientX > bounds.right - 200
+      
+      setMenu({
+        id: node.id,
+        status: node.data.status as string,
+        top: !isBottom ? event.clientY - bounds.top : undefined,
+        left: !isRight ? event.clientX - bounds.left : undefined,
+        bottom: isBottom ? bounds.bottom - event.clientY : undefined,
+        right: isRight ? bounds.right - event.clientX : undefined,
+      })
+    },
+    [setMenu]
+  )
+
+  const onPaneClick = useCallback(() => setMenu(null), [setMenu])
 
   useEffect(() => {
     const counts: Record<number, number> = {}
@@ -95,7 +150,7 @@ export function EmsTopology({ components }: { components: ComponentStatus[] }) {
         return {
           id: component.id,
           position,
-          data: { label: `${component.label} · ${component.status}` },
+          data: { label: `${component.label} · ${component.status}`, status: component.status },
           style: {
             fontSize: 12,
             fontWeight: isRunning ? 500 : 700,
@@ -117,7 +172,7 @@ export function EmsTopology({ components }: { components: ComponentStatus[] }) {
         newNodes.push({
           id: 'dn-mock',
           position,
-          data: { label: 'Data Network (DN)' },
+          data: { label: 'Data Network (DN)', status: 'mock' },
           style: {
             fontSize: 12,
             fontWeight: 700,
@@ -190,16 +245,54 @@ export function EmsTopology({ components }: { components: ComponentStatus[] }) {
     })
   }, [components, setNodes, setEdges])
 
+  const isLoading = startMutation.isPending || stopMutation.isPending
+
   return (
-    <ReactFlow 
-      nodes={nodes} 
-      edges={edges} 
-      onNodesChange={onNodesChange}
-      onEdgesChange={onEdgesChange}
-      fitView
-    >
-      <Background />
-      <Controls />
-    </ReactFlow>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <ReactFlow 
+        nodes={nodes} 
+        edges={edges} 
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeContextMenu={onNodeContextMenu}
+        onPaneClick={onPaneClick}
+        fitView
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
+
+      {menu && menu.id !== 'dn-mock' && (
+        <div
+          className="absolute z-50 rounded-md border shadow-md p-1 min-w-[160px] bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800"
+          style={{ top: menu.top, left: menu.left, right: menu.right, bottom: menu.bottom }}
+        >
+          <div className="px-2 py-1.5 text-xs font-semibold border-b mb-1 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100">
+            {menu.id.toUpperCase()}
+          </div>
+          
+          {menu.status === 'running' ? (
+             <button 
+               onClick={() => stopMutation.mutate(menu.id)} 
+               disabled={isLoading}
+               className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm text-red-600 dark:text-red-500 font-medium disabled:opacity-50 transition-colors"
+             >
+               🔴 Apagar componente
+             </button>
+          ) : (
+             <button 
+               onClick={() => startMutation.mutate(menu.id)} 
+               disabled={isLoading}
+               className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm text-emerald-600 dark:text-emerald-500 font-medium disabled:opacity-50 transition-colors"
+             >
+               🟢 Encender componente
+             </button>
+          )}
+          
+          <button disabled className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm opacity-40 cursor-not-allowed text-zinc-900 dark:text-zinc-100">📄 Ver Logs</button>
+          <button disabled className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm opacity-40 cursor-not-allowed text-zinc-900 dark:text-zinc-100">ℹ️ Información</button>
+        </div>
+      )}
+    </div>
   )
 }

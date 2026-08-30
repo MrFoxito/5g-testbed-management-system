@@ -40,7 +40,7 @@ CATALOG = {
             {"id": "upf", "label": "UPF", "kind": "user-plane", "unit": "open5gs-upfd", "depends_on": ["smf"]},
             {"id": "amf", "label": "AMF", "kind": "core", "unit": "open5gs-amfd", "depends_on": ["nrf", "ausf", "nssf"]},
             {"id": "gnb", "label": "gNodeB (UERANSIM)", "kind": "ran", "unit": "ueransim-gnb", "depends_on": ["amf", "upf"]},
-            {"id": "ue", "label": "UE (UERANSIM)", "kind": "ue", "unit": "ueransim-ue", "depends_on": ["gnb"]},
+            {"id": "ue", "label": "UE (UERANSIM)", "kind": "ue", "unit": "ueransim-ue", "depends_on": ["gnb", "amf"]},
         ],
         "defaults": {"mcc": "999", "mnc": "70", "tac": 1, "apn_dnn": "internet", "sst": 1, "sd": "ffffff"},
     },
@@ -99,6 +99,20 @@ class ScenarioManager:
                 await self.adapter.stop_service(component["unit"])
             self._persist(scenario_id, ScenarioState.stopped, {})
             return await self.status(scenario_id)
+
+    async def start_component(self, scenario_id: str, component_id: str) -> None:
+        async with self.locks[scenario_id]:
+            component = next((c for c in CATALOG[scenario_id]["components"] if c["id"] == component_id), None)
+            if not component:
+                raise ValueError("Componente no encontrado")
+            await self.adapter.start_service(component["unit"])
+
+    async def stop_component(self, scenario_id: str, component_id: str) -> None:
+        async with self.locks[scenario_id]:
+            component = next((c for c in CATALOG[scenario_id]["components"] if c["id"] == component_id), None)
+            if not component:
+                raise ValueError("Componente no encontrado")
+            await self.adapter.stop_service(component["unit"])
 
 
 scenario_manager = ScenarioManager()

@@ -91,7 +91,7 @@ export function Dashboard() {
               <CardTitle>Topología en vivo</CardTitle>
             </CardHeader>
             <CardContent className='h-[390px]'>
-              <EmsTopology components={status.data?.components ?? []} />
+              <EmsTopology scenarioId={scenarioId} components={status.data?.components ?? []} />
             </CardContent>
           </Card>
           <Card>
