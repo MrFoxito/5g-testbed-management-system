@@ -43,6 +43,11 @@ def initialize() -> None:
               scenario_id TEXT PRIMARY KEY, state TEXT NOT NULL,
               parameters TEXT NOT NULL, message TEXT, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS alarm_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id TEXT NOT NULL,
+              component TEXT NOT NULL, severity TEXT NOT NULL, state TEXT NOT NULL,
+              message TEXT NOT NULL, observed_at TEXT NOT NULL
+            );
             """
         )
         users = [
@@ -64,3 +69,20 @@ def add_audit(username: str, role: str, testbed: str | None, action: str, parame
             "INSERT INTO audit_events(username,role,testbed,action,parameters,result,created_at) VALUES(?,?,?,?,?,?,?)",
             (username, role, testbed, action, json.dumps(safe), result, datetime.now(timezone.utc).isoformat()),
         )
+
+
+def insert_alarm(scenario_id: str, component: str, severity: str, state: str, message: str, observed_at: str) -> None:
+    with transaction() as conn:
+        conn.execute(
+            "INSERT INTO alarm_history(scenario_id,component,severity,state,message,observed_at) VALUES(?,?,?,?,?,?)",
+            (scenario_id, component, severity, state, message, observed_at),
+        )
+
+
+def get_alarm_history(scenario_id: str) -> list[dict]:
+    with transaction() as conn:
+        rows = conn.execute(
+            "SELECT id, scenario_id, component, severity, state, message, observed_at FROM alarm_history WHERE scenario_id=? ORDER BY observed_at DESC", 
+            (scenario_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]

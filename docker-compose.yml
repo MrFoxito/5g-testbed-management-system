@@ -9,6 +9,8 @@ services:
       EMS_BACKUP_DIR: /app/data/backups
       EMS_ALLOWED_CONFIG_ROOTS: '["/app/data/testbed-config"]'
       EMS_ALLOWED_INTERFACES: '["lo","ogstun"]'
+      EMS_ENABLE_MONGO: "true"
+      EMS_MONGO_URI: "mongodb://192.168.18.197:27017"
     volumes:
       - ems-data:/app/data
     ports:

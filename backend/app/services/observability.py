@@ -113,13 +113,31 @@ class MetricsService:
         }
 
 
+ACTIVE_ALARMS: dict[str, set[str]] = {}
+
 async def collect_alarms(scenario_id: str) -> list[dict]:
+    from app.db import insert_alarm
+    
     status = await scenario_manager.status(scenario_id)
     alarms = []
+    
+    if scenario_id not in ACTIVE_ALARMS:
+        ACTIVE_ALARMS[scenario_id] = set()
+    
+    current_active = set()
+    now = datetime.now(timezone.utc).isoformat()
+    
     for component in status.components:
         if component.status == "running":
             continue
+        
+        current_active.add(component.id)
         severity = Severity.critical if component.kind in {"database", "core"} else Severity.major
+        msg = f"{component.label} no está activo"
+        
+        if component.id not in ACTIVE_ALARMS[scenario_id]:
+            insert_alarm(scenario_id, component.id, severity.value, "active", msg, now)
+            
         alarms.append({
             "id": f"{scenario_id}:{component.id}:service-down",
             "scenario_id": scenario_id,
@@ -127,9 +145,18 @@ async def collect_alarms(scenario_id: str) -> list[dict]:
             "severity": severity,
             "state": "active",
             "probable_cause": "serviceUnavailable",
-            "message": f"{component.label} no está activo",
-            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "message": msg,
+            "observed_at": now,
         })
+        
+    recovered = ACTIVE_ALARMS[scenario_id] - current_active
+    for comp_id in recovered:
+        comp = next((c for c in CATALOG[scenario_id]["components"] if c["id"] == comp_id), None)
+        if comp:
+            severity = Severity.critical if comp["kind"] in {"database", "core"} else Severity.major
+            insert_alarm(scenario_id, comp_id, severity.value, "cleared", f"{comp['label']} se ha recuperado", now)
+
+    ACTIVE_ALARMS[scenario_id] = current_active
     return alarms
 
 

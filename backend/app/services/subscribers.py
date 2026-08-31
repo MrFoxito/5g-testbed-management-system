@@ -21,16 +21,46 @@ class SubscriberService:
         return MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=2000)[settings.mongo_database]["subscribers"]
 
     def _document(self, item: SubscriberCreate) -> dict:
-        session = {"name": item.apn_dnn, "type": 3}
-        slice_data = {"sst": item.sst, "default_indicator": True, "session": [session]}
+        session = {
+            "name": item.apn_dnn,
+            "type": 3,
+            "qos": {
+                "index": 9,
+                "arp": {
+                    "priority_level": 8,
+                    "pre_emption_capability": 1,
+                    "pre_emption_vulnerability": 1
+                }
+            },
+            "ambr": {
+                "downlink": {"value": 1, "unit": 3},
+                "uplink": {"value": 1, "unit": 3}
+            }
+        }
+        
+        slice_data = {
+            "sst": item.sst,
+            "default_indicator": True,
+            "session": [session]
+        }
+        
         if item.sd:
             slice_data["sd"] = item.sd
+            
         return {
             "imsi": item.imsi,
-            "subscriber_status": 0,
-            "network_access_mode": 0,
-            "security": {"k": item.key, "opc": item.opc, "amf": item.amf},
-            "slice": [slice_data],
+            "subscriber_status": "0",
+            "network_access_mode": "0",
+            "ambr": {
+                "downlink": {"value": 1, "unit": 3},
+                "uplink": {"value": 1, "unit": 3}
+            },
+            "security": {
+                "k": item.key,
+                "opc": item.opc,
+                "amf": item.amf
+            },
+            "slice": [slice_data]
         }
 
     def _public(self, document: dict) -> dict:

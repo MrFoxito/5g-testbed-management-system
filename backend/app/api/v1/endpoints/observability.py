@@ -27,6 +27,14 @@ async def alarms(scenario_id: str, _: UserPublic = Depends(current_user)):
     return await collect_alarms(scenario_id)
 
 
+@router.get("/alarms/{scenario_id}/history")
+def alarm_history(scenario_id: str, _: UserPublic = Depends(current_user)):
+    from app.db import get_alarm_history
+    if scenario_id not in CATALOG:
+        raise HTTPException(404, "Escenario no encontrado")
+    return get_alarm_history(scenario_id)
+
+
 @router.get("/logs/{scenario_id}/{component_id}")
 async def logs(scenario_id: str, component_id: str, _: UserPublic = Depends(current_user)):
     if scenario_id not in CATALOG:
