@@ -20,6 +20,7 @@ import { Route as authSignInRouteImport } from './routes/(auth)/sign-in'
 import { Route as AuthenticatedTracesIndexRouteImport } from './routes/_authenticated/traces/index'
 import { Route as AuthenticatedTopologyIndexRouteImport } from './routes/_authenticated/topology/index'
 import { Route as AuthenticatedSubscribersIndexRouteImport } from './routes/_authenticated/subscribers/index'
+import { Route as AuthenticatedPerformanceIndexRouteImport } from './routes/_authenticated/performance/index'
 import { Route as AuthenticatedConfigurationIndexRouteImport } from './routes/_authenticated/configuration/index'
 import { Route as AuthenticatedAuditIndexRouteImport } from './routes/_authenticated/audit/index'
 import { Route as AuthenticatedAlarmsIndexRouteImport } from './routes/_authenticated/alarms/index'
@@ -82,6 +83,12 @@ const AuthenticatedSubscribersIndexRoute =
     path: '/subscribers/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedPerformanceIndexRoute =
+  AuthenticatedPerformanceIndexRouteImport.update({
+    id: '/performance/',
+    path: '/performance/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedConfigurationIndexRoute =
   AuthenticatedConfigurationIndexRouteImport.update({
     id: '/configuration/',
@@ -118,6 +125,7 @@ export interface FileRoutesByFullPath {
   '/alarms/': typeof AuthenticatedAlarmsIndexRoute
   '/audit/': typeof AuthenticatedAuditIndexRoute
   '/configuration/': typeof AuthenticatedConfigurationIndexRoute
+  '/performance/': typeof AuthenticatedPerformanceIndexRoute
   '/subscribers/': typeof AuthenticatedSubscribersIndexRoute
   '/topology/': typeof AuthenticatedTopologyIndexRoute
   '/traces/': typeof AuthenticatedTracesIndexRoute
@@ -134,6 +142,7 @@ export interface FileRoutesByTo {
   '/alarms': typeof AuthenticatedAlarmsIndexRoute
   '/audit': typeof AuthenticatedAuditIndexRoute
   '/configuration': typeof AuthenticatedConfigurationIndexRoute
+  '/performance': typeof AuthenticatedPerformanceIndexRoute
   '/subscribers': typeof AuthenticatedSubscribersIndexRoute
   '/topology': typeof AuthenticatedTopologyIndexRoute
   '/traces': typeof AuthenticatedTracesIndexRoute
@@ -152,6 +161,7 @@ export interface FileRoutesById {
   '/_authenticated/alarms/': typeof AuthenticatedAlarmsIndexRoute
   '/_authenticated/audit/': typeof AuthenticatedAuditIndexRoute
   '/_authenticated/configuration/': typeof AuthenticatedConfigurationIndexRoute
+  '/_authenticated/performance/': typeof AuthenticatedPerformanceIndexRoute
   '/_authenticated/subscribers/': typeof AuthenticatedSubscribersIndexRoute
   '/_authenticated/topology/': typeof AuthenticatedTopologyIndexRoute
   '/_authenticated/traces/': typeof AuthenticatedTracesIndexRoute
@@ -170,6 +180,7 @@ export interface FileRouteTypes {
     | '/alarms/'
     | '/audit/'
     | '/configuration/'
+    | '/performance/'
     | '/subscribers/'
     | '/topology/'
     | '/traces/'
@@ -186,6 +197,7 @@ export interface FileRouteTypes {
     | '/alarms'
     | '/audit'
     | '/configuration'
+    | '/performance'
     | '/subscribers'
     | '/topology'
     | '/traces'
@@ -203,6 +215,7 @@ export interface FileRouteTypes {
     | '/_authenticated/alarms/'
     | '/_authenticated/audit/'
     | '/_authenticated/configuration/'
+    | '/_authenticated/performance/'
     | '/_authenticated/subscribers/'
     | '/_authenticated/topology/'
     | '/_authenticated/traces/'
@@ -297,6 +310,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSubscribersIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/performance/': {
+      id: '/_authenticated/performance/'
+      path: '/performance'
+      fullPath: '/performance/'
+      preLoaderRoute: typeof AuthenticatedPerformanceIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/configuration/': {
       id: '/_authenticated/configuration/'
       path: '/configuration'
@@ -334,6 +354,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAlarmsIndexRoute: typeof AuthenticatedAlarmsIndexRoute
   AuthenticatedAuditIndexRoute: typeof AuthenticatedAuditIndexRoute
   AuthenticatedConfigurationIndexRoute: typeof AuthenticatedConfigurationIndexRoute
+  AuthenticatedPerformanceIndexRoute: typeof AuthenticatedPerformanceIndexRoute
   AuthenticatedSubscribersIndexRoute: typeof AuthenticatedSubscribersIndexRoute
   AuthenticatedTopologyIndexRoute: typeof AuthenticatedTopologyIndexRoute
   AuthenticatedTracesIndexRoute: typeof AuthenticatedTracesIndexRoute
@@ -345,6 +366,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAlarmsIndexRoute: AuthenticatedAlarmsIndexRoute,
   AuthenticatedAuditIndexRoute: AuthenticatedAuditIndexRoute,
   AuthenticatedConfigurationIndexRoute: AuthenticatedConfigurationIndexRoute,
+  AuthenticatedPerformanceIndexRoute: AuthenticatedPerformanceIndexRoute,
   AuthenticatedSubscribersIndexRoute: AuthenticatedSubscribersIndexRoute,
   AuthenticatedTopologyIndexRoute: AuthenticatedTopologyIndexRoute,
   AuthenticatedTracesIndexRoute: AuthenticatedTracesIndexRoute,

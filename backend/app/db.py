@@ -43,6 +43,168 @@ def initialize() -> None:
               scenario_id TEXT PRIMARY KEY, state TEXT NOT NULL,
               parameters TEXT NOT NULL, message TEXT, updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS trace_tasks (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              trace_type TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              testbed_id TEXT NOT NULL,
+              owner TEXT NOT NULL,
+              owner_role TEXT NOT NULL,
+              capture_agent_id TEXT NOT NULL,
+              capture_host TEXT,
+              node_id TEXT,
+              component_id TEXT,
+              capture_point TEXT,
+              selector_kind TEXT,
+              selector_hash TEXT,
+              selector_masked TEXT,
+              procedures TEXT NOT NULL DEFAULT '[]',
+              interfaces_3gpp TEXT NOT NULL DEFAULT '[]',
+              protocols TEXT NOT NULL DEFAULT '[]',
+              include_user_plane INTEGER NOT NULL DEFAULT 0,
+              include_sbi INTEGER NOT NULL DEFAULT 0,
+              auto_trigger INTEGER NOT NULL DEFAULT 0,
+              duration_seconds INTEGER NOT NULL,
+              max_megabytes INTEGER NOT NULL,
+              status TEXT NOT NULL,
+              result TEXT,
+              source TEXT,
+              device TEXT,
+              filter_profile TEXT,
+              pcap_file TEXT NOT NULL,
+              filtered_file TEXT,
+              analysis_file TEXT,
+              pid INTEGER,
+              remote_path TEXT,
+              remote_log TEXT,
+              packet_count INTEGER NOT NULL DEFAULT 0,
+              size_bytes INTEGER NOT NULL DEFAULT 0,
+              protocol_summary TEXT NOT NULL DEFAULT '[]',
+              message TEXT,
+              created_at TEXT NOT NULL,
+              started_at TEXT,
+              completed_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_trace_tasks_created
+              ON trace_tasks(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_trace_tasks_owner
+              ON trace_tasks(owner, testbed_id);
+            CREATE TABLE IF NOT EXISTS trace_events (
+              task_id TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              ordinal INTEGER NOT NULL,
+              timestamp TEXT NOT NULL,
+              relative_ms REAL NOT NULL,
+              source_nf TEXT NOT NULL,
+              target_nf TEXT NOT NULL,
+              interface_3gpp TEXT NOT NULL,
+              protocol TEXT NOT NULL,
+              message TEXT NOT NULL,
+              procedure TEXT NOT NULL,
+              status TEXT NOT NULL,
+              packet_number INTEGER,
+              evidence_type TEXT NOT NULL,
+              identifiers TEXT NOT NULL DEFAULT '[]',
+              PRIMARY KEY(task_id, event_id),
+              FOREIGN KEY(task_id) REFERENCES trace_tasks(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS metric_samples (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              collected_at TEXT NOT NULL,
+              bucket_epoch INTEGER NOT NULL,
+              testbed_id TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              object_id TEXT NOT NULL,
+              counter_id TEXT NOT NULL,
+              value REAL NOT NULL,
+              unit TEXT NOT NULL,
+              source TEXT NOT NULL,
+              quality TEXT NOT NULL DEFAULT 'measured',
+              UNIQUE(bucket_epoch, testbed_id, scenario_id, object_id, counter_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_metric_samples_query
+              ON metric_samples(testbed_id, scenario_id, counter_id, object_id, bucket_epoch);
+            CREATE TABLE IF NOT EXISTS kpi_folders (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              owner TEXT NOT NULL,
+              testbed_id TEXT NOT NULL,
+              scope TEXT NOT NULL DEFAULT 'personal',
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_kpi_folders_owner
+              ON kpi_folders(owner, testbed_id, scope);
+            CREATE TABLE IF NOT EXISTS kpi_queries (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              folder_id TEXT,
+              owner TEXT NOT NULL,
+              testbed_id TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              scope TEXT NOT NULL DEFAULT 'personal',
+              object_ids TEXT NOT NULL,
+              counter_ids TEXT NOT NULL,
+              range_key TEXT NOT NULL,
+              granularity_seconds INTEGER NOT NULL,
+              aggregation TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY(folder_id) REFERENCES kpi_folders(id) ON DELETE SET NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_kpi_queries_owner
+              ON kpi_queries(owner, testbed_id, scope);
+            CREATE TABLE IF NOT EXISTS collector_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              testbed_id TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              status TEXT NOT NULL,
+              sample_count INTEGER NOT NULL DEFAULT 0,
+              error TEXT
+            );
+            CREATE TABLE IF NOT EXISTS telco_events (
+              event_key TEXT PRIMARY KEY,
+              observed_at TEXT NOT NULL,
+              observed_epoch REAL NOT NULL,
+              testbed_id TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              network_function TEXT NOT NULL,
+              procedure TEXT NOT NULL,
+              event_type TEXT NOT NULL,
+              cause TEXT,
+              duration_ms REAL,
+              source TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_telco_events_summary
+              ON telco_events(testbed_id, scenario_id, procedure, event_type, observed_epoch);
+            CREATE TABLE IF NOT EXISTS operation_runs (
+              id TEXT PRIMARY KEY,
+              scenario_id TEXT NOT NULL,
+              testbed_id TEXT NOT NULL,
+              component_id TEXT NOT NULL,
+              component_label TEXT NOT NULL,
+              operation_id TEXT NOT NULL,
+              operation_label TEXT NOT NULL,
+              category TEXT NOT NULL,
+              mutating INTEGER NOT NULL DEFAULT 0,
+              username TEXT NOT NULL,
+              role TEXT NOT NULL,
+              parameters TEXT NOT NULL DEFAULT '{}',
+              status TEXT NOT NULL,
+              source TEXT NOT NULL,
+              output TEXT NOT NULL DEFAULT '',
+              data TEXT,
+              error TEXT,
+              started_at TEXT NOT NULL,
+              completed_at TEXT NOT NULL,
+              duration_ms INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_operation_runs_history
+              ON operation_runs(testbed_id, scenario_id, started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_operation_runs_owner
+              ON operation_runs(username, started_at DESC);
             """
         )
         users = [
@@ -55,6 +217,13 @@ def initialize() -> None:
                 "INSERT OR IGNORE INTO users(username,password_hash,role,testbed) VALUES(?,?,?,?)",
                 (username, hash_password(password), role, testbed),
             )
+        # Remove measurements produced by an obsolete correlation rule. A
+        # control-plane procedure taking over 60 seconds is treated as
+        # uncorrelated, never as a valid latency sample.
+        conn.execute(
+            """DELETE FROM metric_samples
+            WHERE counter_id LIKE '%.latency_ms' AND (value < 0 OR value > 60000)"""
+        )
 
 
 def add_audit(username: str, role: str, testbed: str | None, action: str, parameters: dict, result: str) -> None:

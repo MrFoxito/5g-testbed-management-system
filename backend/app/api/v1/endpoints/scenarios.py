@@ -48,21 +48,25 @@ async def stop(scenario_id: str, user: UserPublic = Depends(operator_user)):
 async def start_component(scenario_id: str, component_id: str, user: UserPublic = Depends(operator_user)):
     ensure_scenario(scenario_id)
     try:
-        await scenario_manager.start_component(scenario_id, component_id)
-        add_audit(user.username, user.role, user.testbed, "component.start", {"scenario_id": scenario_id, "component_id": component_id}, "success")
-        return {"status": "ok"}
+        result = await scenario_manager.start_component(scenario_id, component_id)
+    except KeyError:
+        raise HTTPException(404, "Componente no encontrado")
     except Exception as exc:
         add_audit(user.username, user.role, user.testbed, "component.start", {"scenario_id": scenario_id, "component_id": component_id}, "failed")
         raise HTTPException(500, str(exc))
+    add_audit(user.username, user.role, user.testbed, "component.start", {"scenario_id": scenario_id, "component_id": component_id}, "success")
+    return result
 
 
 @router.post("/{scenario_id}/components/{component_id}/stop")
 async def stop_component(scenario_id: str, component_id: str, user: UserPublic = Depends(operator_user)):
     ensure_scenario(scenario_id)
     try:
-        await scenario_manager.stop_component(scenario_id, component_id)
-        add_audit(user.username, user.role, user.testbed, "component.stop", {"scenario_id": scenario_id, "component_id": component_id}, "success")
-        return {"status": "ok"}
+        result = await scenario_manager.stop_component(scenario_id, component_id)
+    except KeyError:
+        raise HTTPException(404, "Componente no encontrado")
     except Exception as exc:
         add_audit(user.username, user.role, user.testbed, "component.stop", {"scenario_id": scenario_id, "component_id": component_id}, "failed")
         raise HTTPException(500, str(exc))
+    add_audit(user.username, user.role, user.testbed, "component.stop", {"scenario_id": scenario_id, "component_id": component_id}, "success")
+    return result

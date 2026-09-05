@@ -1,5 +1,6 @@
 import {
   Activity,
+  ChartNoAxesCombined,
   FileCode2,
   LayoutDashboard,
   Network,
@@ -25,6 +26,11 @@ export const sidebarData: SidebarData = {
         { title: 'Topología', url: '/topology', icon: Network },
         { title: 'Alarmas', url: '/alarms', icon: ShieldAlert },
         { title: 'Trazas', url: '/traces', icon: Radio },
+        {
+          title: 'Performance',
+          url: '/performance',
+          icon: ChartNoAxesCombined,
+        },
       ],
     },
     {

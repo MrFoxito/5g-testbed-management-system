@@ -1,298 +1,340 @@
-import { useEffect, useState, useCallback, type CSSProperties } from 'react'
+import { useEffect } from 'react'
 import {
   Background,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
-  useNodesState,
   useEdgesState,
-  MarkerType,
+  useNodesState,
   type Edge,
   type Node,
+  type NodeMouseHandler,
+  type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api, type ComponentStatus } from '@/lib/api'
+import {
+  Database,
+  Radio,
+  Router,
+  Server,
+  Smartphone,
+} from 'lucide-react'
+import type { ComponentStatus, RuntimeSnapshot } from '@/lib/api'
 
-// Fallback layout columns
-const columns: Record<string, number> = {
-  database: 0,
-  core: 1,
-  'user-plane': 2,
-  ran: 3,
-  ue: 4,
+export type TopologyView = 'physical' | 'telco'
+export type TopologySelection =
+  | { type: 'host'; id: string }
+  | { type: 'component'; id: string }
+
+// Layout arquitectural 3GPP compacto y balanceado
+const telcoPositions5G: Record<string, { x: number; y: number }> = {
+  // Fila 1: Microservicios Core (Auth a la izquierda, Políticas a la derecha)
+  mongodb: { x: 60,  y: 40 },
+  udr:     { x: 230, y: 40 },
+  udm:     { x: 400, y: 40 },
+  ausf:    { x: 570, y: 40 },
+
+  pcf:     { x: 740, y: 40 },
+  nssf:    { x: 910, y: 40 },
+  nrf:     { x: 1080, y: 40 },
+  scp:     { x: 1250, y: 40 },
+
+  // Fila 2: Plano de Control (AMF sobre gNodeB, SMF sobre UPF)
+  amf:     { x: 400, y: 220 },
+  smf:     { x: 740, y: 220 },
+
+  // Fila 3: Plano de Usuario (Izquierda a Derecha: UE -> gNodeB -> UPF)
+  ue:      { x: 60,  y: 390 },
+  gnb:     { x: 400, y: 390 },
+  upf:     { x: 740, y: 390 },
 }
 
-// Layout teórico SBA 5GC por defecto
-const getInitialPosition = (id: string, kind: string, counts: Record<number, number>) => {
-  const layout: Record<string, {x: number, y: number}> = {
-    'ue': { x: 0, y: 350 },
-    'ueransim': { x: 0, y: 350 },
-    'ran': { x: 200, y: 350 },
-    'gnb': { x: 200, y: 350 },
-    'upf': { x: 450, y: 350 },
-    'amf': { x: 200, y: 200 },
-    'smf': { x: 450, y: 200 },
-    'nssf': { x: 200, y: 50 },
-    'pcf': { x: 450, y: 50 },
-    'ausf': { x: 700, y: 200 },
-    'udm': { x: 700, y: 50 },
-    'udr': { x: 900, y: 50 },
-    'nrf': { x: 900, y: 200 },
+const telcoPositions4G: Record<string, { x: number; y: number }> = {
+  mongodb: { x: 60,  y: 40 },
+  hss:     { x: 380, y: 40 },
+  pcrf:    { x: 720, y: 40 },
+
+  mme:     { x: 380, y: 210 },
+  sgwc:    { x: 720, y: 210 },
+  smf:     { x: 1040, y: 210 },
+
+  ue:      { x: 60,  y: 380 },
+  enb:     { x: 380, y: 380 },
+  sgwu:    { x: 720, y: 380 },
+  upf:     { x: 1040, y: 380 },
+}
+
+// Mapeo unívoco y sobrio de interfaces 3GPP
+const specificTelcoEdges: Record<string, { label: string; stroke: string }> = {
+  // 5G SA
+  'ue-gnb':      { label: 'NR-Uu (Radio)', stroke: 'solid' },
+  'gnb-amf':     { label: 'N2 (NGAP)', stroke: 'solid' },
+  'gnb-upf':     { label: 'N3 (GTP-U)', stroke: 'solid' },
+  'amf-smf':     { label: 'N11 (SBI)', stroke: 'dashed' },
+  'smf-upf':     { label: 'N4 (PFCP)', stroke: 'solid' },
+  'mongodb-udr': { label: 'BSON', stroke: 'dashed' },
+  'udr-udm':     { label: 'Nudr', stroke: 'dashed' },
+  'udm-ausf':    { label: 'Nausf', stroke: 'dashed' },
+  'ausf-amf':    { label: 'Namf / N12', stroke: 'dashed' },
+  'pcf-smf':     { label: 'Npcf', stroke: 'dashed' },
+  'nssf-amf':    { label: 'Nnssf', stroke: 'dashed' },
+  'nrf-scp':     { label: 'SBI', stroke: 'dashed' },
+
+  // 4G EPC
+  'ue-enb':      { label: 'LTE-Uu', stroke: 'solid' },
+  'enb-mme':     { label: 'S1-MME', stroke: 'solid' },
+  'enb-sgwu':    { label: 'S1-U (GTP-U)', stroke: 'solid' },
+  'hss-mme':     { label: 'S6a', stroke: 'solid' },
+  'mme-sgwc':    { label: 'S11', stroke: 'solid' },
+  'sgwc-sgwu':   { label: 'S5/S8 Control', stroke: 'solid' },
+  'sgwc-smf':    { label: 'S5/S8-C', stroke: 'solid' },
+  'sgwu-upf':    { label: 'S5/S8-U', stroke: 'solid' },
+  'pcrf-smf':    { label: 'Gx', stroke: 'solid' },
+  'mongodb-hss': { label: 'BSON', stroke: 'dashed' },
+}
+
+function getComponentIcon(id: string) {
+  if (id === 'ue') {
+    return <Smartphone className='h-6 w-6 text-sky-500 mb-1' />
   }
-  
-  const key = id.toLowerCase()
-  if (layout[key]) return layout[key]
-
-  // Fallback
-  const column = columns[kind] ?? 1
-  counts[column] = (counts[column] ?? 0) + 1
-  return { x: 30 + column * 180, y: counts[column] * 70 }
-}
-
-// Mapa de interfaces 3GPP basado en los pares conectados
-const getInterfaceLabel = (sourceId: string, targetId: string) => {
-  const pair = [sourceId.toLowerCase(), targetId.toLowerCase()].sort().join('-')
-  const interfaceMap: Record<string, string> = {
-    'amf-smf': 'N11',
-    'smf-upf': 'N4',
-    'amf-ausf': 'N12',
-    'amf-udm': 'N8',
-    'smf-udm': 'N10',
-    'amf-nssf': 'N22',
-    'ausf-udm': 'N13',
-    'pcf-smf': 'N7',
-    'amf-pcf': 'N15',
-    'amf-ran': 'N2',
-    'ran-upf': 'N3',
-    'amf-gnb': 'N2',
-    'gnb-upf': 'N3',
-    'amf-ueransim': 'N2',
-    'ueransim-upf': 'N3',
-    'amf-ue': 'N1',
+  if (id === 'gnb' || id === 'enb') {
+    return <Radio className='h-6 w-6 text-indigo-500 mb-1' />
   }
-  return interfaceMap[pair]
+  if (id === 'upf' || id === 'sgwu') {
+    return <Router className='h-6 w-6 text-emerald-500 mb-1' />
+  }
+  if (id === 'mongodb') {
+    return <Database className='h-6 w-6 text-amber-500 mb-1' />
+  }
+  return <Server className='h-5 w-5 text-purple-400/80 mb-1' />
 }
 
-type MenuState = {
-  id: string
-  status: string
-  top?: number
-  left?: number
-  right?: number
-  bottom?: number
-}
-
-export function EmsTopology({ scenarioId, components }: { scenarioId: string; components: ComponentStatus[] }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  
-  const queryClient = useQueryClient()
-  const [menu, setMenu] = useState<MenuState | null>(null)
-
-  const startMutation = useMutation({
-    mutationFn: (componentId: string) => api.post(`/scenarios/${scenarioId}/components/${componentId}/start`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['status', scenarioId] })
-      setMenu(null)
-    },
-  })
-
-  const stopMutation = useMutation({
-    mutationFn: (componentId: string) => api.post(`/scenarios/${scenarioId}/components/${componentId}/stop`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['status', scenarioId] })
-      setMenu(null)
-    },
-  })
-
-  const onNodeContextMenu = useCallback(
-    (event: React.MouseEvent, node: Node) => {
-      event.preventDefault()
-      
-      const pane = (event.target as Element).closest('.react-flow')
-      if (!pane) return
-      
-      const bounds = pane.getBoundingClientRect()
-      
-      const isBottom = event.clientY > bounds.bottom - 200
-      const isRight = event.clientX > bounds.right - 200
-      
-      setMenu({
-        id: node.id,
-        status: node.data.status as string,
-        top: !isBottom ? event.clientY - bounds.top : undefined,
-        left: !isRight ? event.clientX - bounds.left : undefined,
-        bottom: isBottom ? bounds.bottom - event.clientY : undefined,
-        right: isRight ? bounds.right - event.clientX : undefined,
-      })
-    },
-    [setMenu]
-  )
-
-  const onPaneClick = useCallback(() => setMenu(null), [setMenu])
-
-  useEffect(() => {
-    const counts: Record<number, number> = {}
-    
-    setNodes((currentNodes) => {
-      const newNodes = components.map((component) => {
-        const existingNode = currentNodes.find((n) => n.id === component.id)
-        let position = existingNode?.position
-        if (!position) {
-          position = getInitialPosition(component.id, component.kind, counts)
-        }
-
-        const isRunning = component.status === 'running'
-        const borderColor = isRunning ? '#10b981' : '#ef4444' // Verde si ok, Rojo si caído
-        const bgColor = isRunning ? 'hsl(var(--card))' : '#fef2f2'
-        const textColor = isRunning ? 'hsl(var(--card-foreground))' : '#991b1b'
-
-        return {
-          id: component.id,
-          position,
-          data: { label: `${component.label} · ${component.status}`, status: component.status },
-          style: {
-            fontSize: 12,
-            fontWeight: isRunning ? 500 : 700,
-            borderColor,
-            borderWidth: isRunning ? 1 : 2,
-            background: bgColor,
-            color: textColor,
-            borderRadius: 8,
-            padding: 10,
-          } as CSSProperties,
-        }
-      })
-
-      // Nodo ficticio DN (Data Network) conectado al UPF
-      const upfNode = newNodes.find(n => n.id.toLowerCase().includes('upf'))
-      if (upfNode) {
-        const existingDn = currentNodes.find(n => n.id === 'dn-mock')
-        const position = existingDn?.position || { x: upfNode.position.x + 200, y: upfNode.position.y }
-        newNodes.push({
-          id: 'dn-mock',
-          position,
-          data: { label: 'Data Network (DN)', status: 'mock' },
-          style: {
-            fontSize: 12,
-            fontWeight: 700,
-            borderColor: '#3b82f6', 
-            borderWidth: 2,
-            borderStyle: 'dashed',
-            background: 'hsl(var(--card))',
-            color: '#1d4ed8',
-            borderRadius: 8,
-            padding: 10,
-          } as CSSProperties,
-        })
-      }
-
-      return newNodes
-    })
-
-    setEdges(() => {
-      const newEdges = components.flatMap((component) =>
-        component.depends_on.map((parent) => {
-          const label = getInterfaceLabel(parent, component.id)
-          const isRunning = component.status === 'running'
-          const edgeColor = isRunning ? '#10b981' : '#9ca3af'
-          
-          return {
-            id: `${parent}-${component.id}`,
-            source: parent,
-            target: component.id,
-            animated: isRunning,
-            type: 'smoothstep',
-            label,
-            labelStyle: { fill: '#ffffff', fontWeight: 700, fontSize: 11 },
-            labelBgStyle: { fill: '#374151', fillOpacity: 1, rx: 4, ry: 4 },
-            labelBgPadding: [6, 4] as [number, number],
-            style: { 
-              stroke: edgeColor,
-              strokeWidth: isRunning ? 2 : 1.5,
-            },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              width: 15,
-              height: 15,
-              color: edgeColor,
-            },
-          }
-        })
-      )
-
-      // Arista ficticia N6 (UPF -> DN)
-      const upfNode = components.find(c => c.id.toLowerCase().includes('upf'))
-      if (upfNode) {
-        const isRunning = upfNode.status === 'running'
-        const edgeColor = isRunning ? '#10b981' : '#9ca3af'
-        newEdges.push({
-          id: `${upfNode.id}-dn-mock`,
-          source: upfNode.id,
-          target: 'dn-mock',
-          animated: isRunning,
-          type: 'smoothstep',
-          label: 'N6',
-          labelStyle: { fill: '#ffffff', fontWeight: 700, fontSize: 11 },
-          labelBgStyle: { fill: '#374151', fillOpacity: 1, rx: 4, ry: 4 },
-          labelBgPadding: [6, 4] as [number, number],
-          style: { stroke: edgeColor, strokeWidth: isRunning ? 2 : 1.5 },
-          markerEnd: { type: MarkerType.ArrowClosed, width: 15, height: 15, color: edgeColor },
-        })
-      }
-
-      return newEdges
-    })
-  }, [components, setNodes, setEdges])
-
-  const isLoading = startMutation.isPending || stopMutation.isPending
+// Componente de nodo limpio, sobrio y profesional con icono nativo de telecomunicaciones
+function TelcoNode({ data }: NodeProps) {
+  const isRunning = data.status === 'running'
+  const id = String(data.id ?? data.label).toLowerCase()
+  const kind = String(data.kind ?? '')
+  const icon = getComponentIcon(id)
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <ReactFlow 
-        nodes={nodes} 
-        edges={edges} 
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onNodeContextMenu={onNodeContextMenu}
-        onPaneClick={onPaneClick}
-        fitView
-      >
-        <Background />
-        <Controls />
-      </ReactFlow>
+    <div
+      className={`relative flex flex-col items-center justify-center rounded-2xl border-2 px-5 py-3.5 transition-all duration-200 select-none shadow-sm ${
+        isRunning
+          ? 'bg-card border-border hover:border-primary text-card-foreground hover:shadow-md'
+          : 'bg-destructive/10 border-destructive text-destructive shadow-lg animate-pulse'
+      }`}
+      style={{ minWidth: 140, minHeight: 74 }}
+    >
+      {/* Handles para conexiones limpias */}
+      <Handle type='target' position={Position.Top} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+      <Handle type='source' position={Position.Bottom} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+      <Handle type='target' position={Position.Left} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+      <Handle type='source' position={Position.Right} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
 
-      {menu && menu.id !== 'dn-mock' && (
-        <div
-          className="absolute z-50 rounded-md border shadow-md p-1 min-w-[160px] bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800"
-          style={{ top: menu.top, left: menu.left, right: menu.right, bottom: menu.bottom }}
-        >
-          <div className="px-2 py-1.5 text-xs font-semibold border-b mb-1 border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100">
-            {menu.id.toUpperCase()}
-          </div>
-          
-          {menu.status === 'running' ? (
-             <button 
-               onClick={() => stopMutation.mutate(menu.id)} 
-               disabled={isLoading}
-               className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm text-red-600 dark:text-red-500 font-medium disabled:opacity-50 transition-colors"
-             >
-               🔴 Apagar componente
-             </button>
-          ) : (
-             <button 
-               onClick={() => startMutation.mutate(menu.id)} 
-               disabled={isLoading}
-               className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm text-emerald-600 dark:text-emerald-500 font-medium disabled:opacity-50 transition-colors"
-             >
-               🟢 Encender componente
-             </button>
-          )}
-          
-          <button disabled className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm opacity-40 cursor-not-allowed text-zinc-900 dark:text-zinc-100">📄 Ver Logs</button>
-          <button disabled className="w-full text-left px-2 py-1.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-sm opacity-40 cursor-not-allowed text-zinc-900 dark:text-zinc-100">ℹ️ Información</button>
-        </div>
-      )}
+      {/* Status LED */}
+      <span
+        className={`absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full ${
+          isRunning ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-red-500 shadow-[0_0_8px_#ef4444]'
+        }`}
+      />
+
+      {/* Icono temático del nodo (Celular para UE, Antena para gNodeB, etc.) */}
+      {icon}
+
+      {/* Gran Nombre de la NF */}
+      <span className='text-base font-black tracking-tight font-mono text-foreground leading-tight'>
+        {String(data.label)}
+      </span>
+
+      {/* Rol / Subtítulo discreto */}
+      <span className='mt-0.5 text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-80'>
+        {kind}
+      </span>
     </div>
+  )
+}
+
+const nodeTypes = {
+  telcoNode: TelcoNode,
+}
+
+function telcoElements(components: ComponentStatus[]) {
+  const is5g = components.some((c) => c.id === 'amf' || c.id === 'gnb')
+  const posMap = is5g ? telcoPositions5G : telcoPositions4G
+
+  const nodes: Node[] = components.map((component, idx) => {
+    const defaultPos = { x: 50 + (idx % 4) * 200, y: Math.floor(idx / 4) * 120 }
+    const pos = posMap[component.id] ?? defaultPos
+
+    return {
+      id: component.id,
+      type: 'telcoNode',
+      position: pos,
+      data: {
+        selectionType: 'component',
+        id: component.id,
+        label: component.label,
+        kind: component.kind,
+        status: component.status,
+      },
+    }
+  })
+
+  // Enlaces arquitecturales sobrios y nítidos
+  const edges: Edge[] = []
+  const directTelcoLinks = is5g
+    ? [
+        { from: 'ue', to: 'gnb' },
+        { from: 'gnb', to: 'upf' },
+        { from: 'gnb', to: 'amf' },
+        { from: 'amf', to: 'smf' },
+        { from: 'smf', to: 'upf' },
+        { from: 'mongodb', to: 'udr' },
+        { from: 'udr', to: 'udm' },
+        { from: 'udm', to: 'ausf' },
+        { from: 'ausf', to: 'amf' },
+        { from: 'pcf', to: 'smf' },
+        { from: 'nssf', to: 'amf' },
+        { from: 'nrf', to: 'scp' },
+      ]
+    : [
+        { from: 'ue', to: 'enb' },
+        { from: 'enb', to: 'sgwu' },
+        { from: 'enb', to: 'mme' },
+        { from: 'hss', to: 'mme' },
+        { from: 'mme', to: 'sgwc' },
+        { from: 'sgwc', to: 'sgwu' },
+        { from: 'sgwc', to: 'smf' },
+        { from: 'sgwu', to: 'upf' },
+        { from: 'pcrf', to: 'smf' },
+        { from: 'mongodb', to: 'hss' },
+      ]
+
+  for (const link of directTelcoLinks) {
+    const hasSource = components.some((c) => c.id === link.from)
+    const hasTarget = components.some((c) => c.id === link.to)
+    if (!hasSource || !hasTarget) continue
+
+    const key = `${link.from}-${link.to}`
+    const info = specificTelcoEdges[key] ?? {
+      label: 'Control',
+      stroke: 'dashed',
+    }
+
+    edges.push({
+      id: key,
+      source: link.from,
+      target: link.to,
+      animated: true,
+      label: info.label,
+      labelStyle: {
+        fontSize: 10,
+        fontWeight: 700,
+        fill: 'var(--foreground)',
+        fontFamily: 'ui-monospace, monospace',
+      },
+      labelBgPadding: [6, 3],
+      labelBgBorderRadius: 6,
+      labelBgStyle: {
+        fill: 'var(--card)',
+        stroke: 'var(--border)',
+        strokeWidth: 1.5,
+      },
+      style: {
+        stroke: 'var(--muted-foreground)',
+        strokeWidth: 2,
+        strokeDasharray: info.stroke === 'dashed' ? '5,5' : undefined,
+      },
+    })
+  }
+
+  return { nodes, edges }
+}
+
+function physicalElements(
+  components: ComponentStatus[],
+  runtime?: RuntimeSnapshot
+) {
+  if (!runtime) return { nodes: [], edges: [] }
+  const active = components.filter((component) => component.status === 'running')
+    .length
+  const address = runtime.interfaces
+    .flatMap((item) => item.addresses)
+    .find((item) => item.family === 'inet' && !item.address.startsWith('127.'))
+  const node: Node = {
+    id: runtime.hostname,
+    position: { x: 320, y: 180 },
+    data: {
+      selectionType: 'host',
+      label: `${runtime.hostname} · ${address?.address ?? 'sin IP'} · ${active}/${components.length} NFs`,
+    },
+    style: {
+      width: 280,
+      padding: 24,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: active === components.length ? 'var(--primary)' : 'var(--destructive)',
+      background: 'var(--card)',
+      color: 'var(--card-foreground)',
+      fontWeight: 600,
+    },
+  }
+  return { nodes: [node], edges: [] }
+}
+
+export function EmsTopology({
+  components,
+  runtime,
+  view = 'telco',
+  onSelect,
+}: {
+  components: ComponentStatus[]
+  runtime?: RuntimeSnapshot
+  view?: TopologyView
+  onSelect?: (selection: TopologySelection) => void
+}) {
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  useEffect(() => {
+    const next =
+      view === 'physical'
+        ? physicalElements(components, runtime)
+        : telcoElements(components)
+    setNodes((current) => {
+      const positions = new Map(current.map((node) => [node.id, node.position]))
+      return next.nodes.map((node) => ({
+        ...node,
+        position: positions.get(node.id) ?? node.position,
+      }))
+    })
+    setEdges(next.edges)
+  }, [components, runtime, setEdges, setNodes, view])
+
+  const handleNodeClick: NodeMouseHandler = (_, node) => {
+    const type = node.data.selectionType === 'host' ? 'host' : 'component'
+    onSelect?.({ type, id: node.id })
+  }
+
+  return (
+    <ReactFlow
+      nodeTypes={nodeTypes}
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      onNodeClick={handleNodeClick}
+      nodesDraggable
+      nodesConnectable={false}
+      proOptions={{ hideAttribution: true }}
+      fitView
+    >
+      <Background color='var(--border)' gap={20} size={1} />
+      <Controls
+        showInteractive={false}
+        className='!bg-card !border-border !border !shadow-md !rounded-lg overflow-hidden [&>button]:!bg-card [&>button]:!border-border [&>button]:!fill-foreground [&>button:hover]:!bg-muted'
+      />
+    </ReactFlow>
   )
 }

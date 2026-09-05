@@ -1,0 +1,39 @@
+{
+  "4g-epc": {
+    "name": "4G EPC educativo", "technology": "4G", "description": "Baseline multi-VM del Laboratorio 3",
+    "nodes": [{"id": "epc", "label": "EPC", "role": "core"}, {"id": "enb-vm", "label": "eNodeB VM", "role": "ran"}, {"id": "ue-vm", "label": "UE VM", "role": "ue"}],
+    "components": [
+      {"id":"mongodb","label":"MongoDB","kind":"database","node_id":"epc","unit":"mongod","interfaces":[],"depends_on":[]},
+      {"id":"hss","label":"HSS","kind":"core","node_id":"epc","unit":"open5gs-hssd","interfaces":["S6a"],"depends_on":["mongodb"]},
+      {"id":"pcrf","label":"PCRF","kind":"core","node_id":"epc","unit":"open5gs-pcrfd","interfaces":["Gx"],"depends_on":["mongodb"]},
+      {"id":"sgwc","label":"SGW-C","kind":"core","node_id":"epc","unit":"open5gs-sgwcd","interfaces":["S11","S5/S8-C"],"depends_on":[]},
+      {"id":"sgwu","label":"SGW-U","kind":"user-plane","node_id":"epc","unit":"open5gs-sgwud","interfaces":["S1-U","S5/S8-U"],"depends_on":["sgwc"]},
+      {"id":"smf","label":"PGW-C/SMF","kind":"core","node_id":"epc","unit":"open5gs-smfd","interfaces":["S5/S8-C","Gx"],"depends_on":["pcrf"]},
+      {"id":"upf","label":"PGW-U/UPF","kind":"user-plane","node_id":"epc","unit":"open5gs-upfd","interfaces":["S5/S8-U","SGi"],"depends_on":["smf"]},
+      {"id":"mme","label":"MME","kind":"core","node_id":"epc","unit":"open5gs-mmed","interfaces":["S1-MME","S6a","S11"],"depends_on":["hss","sgwc"]},
+      {"id":"enb","label":"eNodeB","kind":"ran","node_id":"enb-vm","unit":"srsenb","interfaces":["S1-MME","S1-U"],"depends_on":["mme","sgwu"]},
+      {"id":"ue","label":"UE","kind":"ue","node_id":"ue-vm","unit":"srsue","interfaces":["LTE-Uu"],"depends_on":["enb"]}
+    ],
+    "defaults": {"mcc":"716","mnc":"10","tac":1,"apn_dnn":"internet"}
+  },
+  "5g-sa": {
+    "name": "5G Standalone educativo", "technology": "5G", "description": "Baseline multi-VM del Laboratorio 4",
+    "nodes": [{"id":"core","label":"5GC","role":"core"}, {"id":"upf-vm","label":"UPF VM","role":"user-plane"}, {"id":"gnb-vm","label":"gNodeB VM","role":"ran"}, {"id":"ue-vm","label":"UE VM","role":"ue"}],
+    "components": [
+      {"id":"mongodb","label":"MongoDB","kind":"database","node_id":"core","unit":"mongod","interfaces":[],"depends_on":[]},
+      {"id":"nrf","label":"NRF","kind":"core","node_id":"core","unit":"open5gs-nrfd","interfaces":["SBI"],"depends_on":[]},
+      {"id":"scp","label":"SCP","kind":"core","node_id":"core","unit":"open5gs-scpd","interfaces":["SBI"],"depends_on":["nrf"]},
+      {"id":"udr","label":"UDR","kind":"core","node_id":"core","unit":"open5gs-udrd","interfaces":["SBI"],"depends_on":["mongodb","nrf"]},
+      {"id":"udm","label":"UDM","kind":"core","node_id":"core","unit":"open5gs-udmd","interfaces":["SBI"],"depends_on":["udr","nrf"]},
+      {"id":"ausf","label":"AUSF","kind":"core","node_id":"core","unit":"open5gs-ausfd","interfaces":["SBI"],"depends_on":["udm","nrf"]},
+      {"id":"pcf","label":"PCF","kind":"core","node_id":"core","unit":"open5gs-pcfd","interfaces":["SBI"],"depends_on":["mongodb","nrf"]},
+      {"id":"nssf","label":"NSSF","kind":"core","node_id":"core","unit":"open5gs-nssfd","interfaces":["SBI"],"depends_on":["nrf"]},
+      {"id":"smf","label":"SMF","kind":"core","node_id":"core","unit":"open5gs-smfd","interfaces":["N4","SBI"],"depends_on":["nrf","pcf"]},
+      {"id":"upf","label":"UPF","kind":"user-plane","node_id":"upf-vm","unit":"open5gs-upfd","interfaces":["N3","N4","N6"],"depends_on":["smf"]},
+      {"id":"amf","label":"AMF","kind":"core","node_id":"core","unit":"open5gs-amfd","interfaces":["N1","N2","SBI"],"depends_on":["nrf","ausf","nssf"]},
+      {"id":"gnb","label":"gNodeB","kind":"ran","node_id":"gnb-vm","unit":"ueransim-gnb","interfaces":["N2","N3","NR-Uu"],"depends_on":["amf","upf"]},
+      {"id":"ue","label":"UE","kind":"ue","node_id":"ue-vm","unit":"ueransim-ue","interfaces":["N1","NR-Uu"],"depends_on":["gnb"]}
+    ],
+    "defaults": {"mcc":"999","mnc":"70","tac":1,"apn_dnn":"internet","sst":1,"sd":"ffffff"}
+  }
+}

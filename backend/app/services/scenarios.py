@@ -4,81 +4,81 @@ from datetime import datetime, timezone
 
 from app.db import transaction
 from app.models import ComponentStatus, ScenarioAction, ScenarioState, ScenarioStatus
+from app.services.catalog import load_catalog
 from app.services.execution import ExecutionAdapter, build_adapter
 
 
-CATALOG = {
-    "4g-epc": {
-        "name": "4G EPC educativo",
-        "technology": "4G",
-        "components": [
-            {"id": "mongodb", "label": "MongoDB", "kind": "database", "unit": "mongod", "depends_on": []},
-            {"id": "hss", "label": "HSS", "kind": "core", "unit": "open5gs-hssd", "depends_on": ["mongodb"]},
-            {"id": "pcrf", "label": "PCRF", "kind": "core", "unit": "open5gs-pcrfd", "depends_on": ["mongodb"]},
-            {"id": "sgwc", "label": "SGW-C", "kind": "core", "unit": "open5gs-sgwcd", "depends_on": []},
-            {"id": "sgwu", "label": "SGW-U", "kind": "user-plane", "unit": "open5gs-sgwud", "depends_on": ["sgwc"]},
-            {"id": "smf", "label": "PGW-C/SMF", "kind": "core", "unit": "open5gs-smfd", "depends_on": ["pcrf"]},
-            {"id": "upf", "label": "PGW-U/UPF", "kind": "user-plane", "unit": "open5gs-upfd", "depends_on": ["smf"]},
-            {"id": "mme", "label": "MME", "kind": "core", "unit": "open5gs-mmed", "depends_on": ["hss", "sgwc"]},
-            {"id": "enb", "label": "eNodeB", "kind": "ran", "unit": "srsenb", "depends_on": ["mme", "upf"]},
-            {"id": "ue", "label": "UE", "kind": "ue", "unit": "srsue", "depends_on": ["enb"]},
-        ],
-        "defaults": {"mcc": "716", "mnc": "10", "tac": 1, "apn_dnn": "internet"},
-    },
-    "5g-sa": {
-        "name": "5G Standalone educativo",
-        "technology": "5G",
-        "components": [
-            {"id": "mongodb", "label": "MongoDB", "kind": "database", "unit": "mongod", "depends_on": []},
-            {"id": "nrf", "label": "NRF", "kind": "core", "unit": "open5gs-nrfd", "depends_on": []},
-            {"id": "udr", "label": "UDR", "kind": "core", "unit": "open5gs-udrd", "depends_on": ["mongodb", "nrf"]},
-            {"id": "udm", "label": "UDM", "kind": "core", "unit": "open5gs-udmd", "depends_on": ["udr", "nrf"]},
-            {"id": "ausf", "label": "AUSF", "kind": "core", "unit": "open5gs-ausfd", "depends_on": ["udm", "nrf"]},
-            {"id": "pcf", "label": "PCF", "kind": "core", "unit": "open5gs-pcfd", "depends_on": ["mongodb", "nrf"]},
-            {"id": "nssf", "label": "NSSF", "kind": "core", "unit": "open5gs-nssfd", "depends_on": ["nrf"]},
-            {"id": "smf", "label": "SMF", "kind": "core", "unit": "open5gs-smfd", "depends_on": ["nrf", "pcf"]},
-            {"id": "upf", "label": "UPF", "kind": "user-plane", "unit": "open5gs-upfd", "depends_on": ["smf"]},
-            {"id": "amf", "label": "AMF", "kind": "core", "unit": "open5gs-amfd", "depends_on": ["nrf", "ausf", "nssf"]},
-            {"id": "gnb", "label": "gNodeB (UERANSIM)", "kind": "ran", "unit": "ueransim-gnb", "depends_on": ["amf", "upf"]},
-            {"id": "ue", "label": "UE (UERANSIM)", "kind": "ue", "unit": "ueransim-ue", "depends_on": ["gnb", "amf"]},
-        ],
-        "defaults": {"mcc": "999", "mnc": "70", "tac": 1, "apn_dnn": "internet", "sst": 1, "sd": "ffffff"},
-    },
-}
+CATALOG = load_catalog()
 
 
 class ScenarioManager:
     def __init__(self) -> None:
-        units = {component["unit"] for scenario in CATALOG.values() for component in scenario["components"]}
+        units = {
+            component["unit"]
+            for scenario in CATALOG.values()
+            for component in scenario["components"]
+        }
         self.adapter: ExecutionAdapter = build_adapter(units)
         self.locks = {scenario_id: asyncio.Lock() for scenario_id in CATALOG}
 
     def list_catalog(self) -> list[dict]:
         return [{"id": key, **value} for key, value in CATALOG.items()]
 
-    def _persist(self, scenario_id: str, state: ScenarioState, parameters: dict, message: str | None = None) -> None:
+    def _persist(
+        self,
+        scenario_id: str,
+        state: ScenarioState,
+        parameters: dict,
+        message: str | None = None,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with transaction() as conn:
             conn.execute(
-                "INSERT INTO scenario_states VALUES(?,?,?,?,?) ON CONFLICT(scenario_id) DO UPDATE SET state=excluded.state,parameters=excluded.parameters,message=excluded.message,updated_at=excluded.updated_at",
+                "INSERT INTO scenario_states VALUES(?,?,?,?,?) "
+                "ON CONFLICT(scenario_id) DO UPDATE SET "
+                "state=excluded.state, parameters=excluded.parameters, "
+                "message=excluded.message, updated_at=excluded.updated_at",
                 (scenario_id, state.value, json.dumps(parameters), message, now),
             )
 
     async def status(self, scenario_id: str) -> ScenarioStatus:
         scenario = CATALOG[scenario_id]
+        units = [item["unit"] for item in scenario["components"]]
+        statuses = await self.adapter.service_statuses(units)
         components = []
         for item in scenario["components"]:
-            components.append(ComponentStatus(
-                id=item["id"], label=item["label"], kind=item["kind"],
-                status=await self.adapter.service_status(item["unit"]), depends_on=item["depends_on"]
-            ))
+            components.append(
+                ComponentStatus(
+                    id=item["id"],
+                    label=item["label"],
+                    kind=item["kind"],
+                    node_id=item["node_id"],
+                    interfaces=item.get("interfaces", []),
+                    status=statuses[item["unit"]],
+                    unit=item["unit"],
+                    depends_on=item.get("depends_on", []),
+                    expected_endpoints=item.get("expected_endpoints", []),
+                    config_paths=item.get("config_paths", []),
+                    procedures=item.get("procedures", []),
+                )
+            )
         running = sum(item.status == "running" for item in components)
-        state = ScenarioState.running if running == len(components) else ScenarioState.stopped if running == 0 else ScenarioState.degraded
-        return ScenarioStatus(scenario_id=scenario_id, state=state, components=components, updated_at=datetime.now(timezone.utc))
+        if running == len(components):
+            state = ScenarioState.running
+        elif running == 0:
+            state = ScenarioState.stopped
+        else:
+            state = ScenarioState.degraded
+        return ScenarioStatus(
+            scenario_id=scenario_id,
+            state=state,
+            components=components,
+            updated_at=datetime.now(timezone.utc),
+        )
 
     async def start(self, scenario_id: str, action: ScenarioAction) -> ScenarioStatus:
         async with self.locks[scenario_id]:
-            self._persist(scenario_id, ScenarioState.deploying, action.parameters.model_dump())
+            self._persist(scenario_id, ScenarioState.starting, action.parameters.model_dump())
             started = []
             try:
                 for component in CATALOG[scenario_id]["components"]:
@@ -88,7 +88,12 @@ class ScenarioManager:
             except Exception as exc:
                 for component in reversed(started):
                     await self.adapter.stop_service(component["unit"])
-                self._persist(scenario_id, ScenarioState.failed, action.parameters.model_dump(), str(exc))
+                self._persist(
+                    scenario_id,
+                    ScenarioState.failed,
+                    action.parameters.model_dump(),
+                    str(exc),
+                )
                 raise
             return await self.status(scenario_id)
 
@@ -100,19 +105,24 @@ class ScenarioManager:
             self._persist(scenario_id, ScenarioState.stopped, {})
             return await self.status(scenario_id)
 
-    async def start_component(self, scenario_id: str, component_id: str) -> None:
-        async with self.locks[scenario_id]:
-            component = next((c for c in CATALOG[scenario_id]["components"] if c["id"] == component_id), None)
-            if not component:
-                raise ValueError("Componente no encontrado")
-            await self.adapter.start_service(component["unit"])
+    def component(self, scenario_id: str, component_id: str) -> dict:
+        component = next(
+            (item for item in CATALOG[scenario_id]["components"] if item["id"] == component_id),
+            None,
+        )
+        if not component:
+            raise KeyError(component_id)
+        return component
 
-    async def stop_component(self, scenario_id: str, component_id: str) -> None:
-        async with self.locks[scenario_id]:
-            component = next((c for c in CATALOG[scenario_id]["components"] if c["id"] == component_id), None)
-            if not component:
-                raise ValueError("Componente no encontrado")
-            await self.adapter.stop_service(component["unit"])
+    async def start_component(self, scenario_id: str, component_id: str) -> ScenarioStatus:
+        component = self.component(scenario_id, component_id)
+        await self.adapter.start_service(component["unit"])
+        return await self.status(scenario_id)
+
+    async def stop_component(self, scenario_id: str, component_id: str) -> ScenarioStatus:
+        component = self.component(scenario_id, component_id)
+        await self.adapter.stop_service(component["unit"])
+        return await self.status(scenario_id)
 
 
 scenario_manager = ScenarioManager()

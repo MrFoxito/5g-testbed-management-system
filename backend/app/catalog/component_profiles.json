@@ -1,0 +1,76 @@
+{
+  "common:mongodb": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.1","port":27017,"interface":"DB"}],
+    "config_paths": ["/etc/mongod.conf"],
+    "procedures": ["Consulta de datos de suscriptor"]
+  },
+  "5G:nrf": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.10","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/nrf.yaml"], "procedures": ["Registro y descubrimiento de NFs"]
+  },
+  "5G:scp": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.200","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/scp.yaml"], "procedures": ["Enrutamiento de mensajes SBI"]
+  },
+  "5G:udr": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.15","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/udr.yaml"], "procedures": ["Acceso a datos de suscriptor"]
+  },
+  "5G:udm": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.12","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/udm.yaml"], "procedures": ["Gestión de identidad y suscripción"]
+  },
+  "5G:ausf": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.11","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/ausf.yaml"], "procedures": ["Autenticación 5G-AKA"]
+  },
+  "5G:pcf": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.13","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/pcf.yaml"], "procedures": ["Aplicación de políticas"]
+  },
+  "5G:nssf": {
+    "expected_endpoints": [{"protocol":"tcp","address":"127.0.0.14","port":7777,"interface":"SBI"}],
+    "config_paths": ["/etc/open5gs/nssf.yaml"], "procedures": ["Selección de slice"]
+  },
+  "5G:smf": {
+    "expected_endpoints": [
+      {"protocol":"tcp","address":"127.0.0.4","port":7777,"interface":"SBI"},
+      {"protocol":"udp","address":"127.0.0.4","port":8805,"interface":"N4"}
+    ],
+    "config_paths": ["/etc/open5gs/smf.yaml"], "procedures": ["Establecimiento de PDU Session", "Control PFCP de UPF"]
+  },
+  "5G:upf": {
+    "expected_endpoints": [
+      {"protocol":"udp","address":"127.0.0.7","port":8805,"interface":"N4"},
+      {"protocol":"udp","address":"127.0.0.7","port":2152,"interface":"N3"}
+    ],
+    "config_paths": ["/etc/open5gs/upf.yaml"], "procedures": ["Creación de sesión PFCP", "Transporte de plano de usuario"]
+  },
+  "5G:amf": {
+    "expected_endpoints": [
+      {"protocol":"tcp","address":"127.0.0.5","port":7777,"interface":"SBI"},
+      {"protocol":"sctp","address":"127.0.0.5","port":38412,"interface":"N2"}
+    ],
+    "config_paths": ["/etc/open5gs/amf.yaml"], "procedures": ["Registration", "Autenticación", "Gestión de movilidad", "PDU Session Establishment"]
+  },
+  "5G:gnb": {
+    "config_paths": ["/home/emsadmin/UERANSIM/config/open5gs-gnb.yaml"],
+    "procedures": ["NG Setup", "Initial UE Message", "Transporte NGAP"]
+  },
+  "5G:ue": {
+    "config_paths": ["/home/emsadmin/UERANSIM/config/open5gs-ue.yaml"],
+    "procedures": ["Registration", "Autenticación", "PDU Session Establishment"]
+  },
+  "4G:mme": {
+    "expected_endpoints": [{"protocol":"sctp","address":"127.0.0.2","port":36412,"interface":"S1-MME"}],
+    "config_paths": ["/etc/open5gs/mme.yaml"], "procedures": ["Attach", "Autenticación EPS", "EPS Bearer Setup"]
+  },
+  "4G:hss": {"config_paths":["/etc/open5gs/hss.yaml"],"procedures":["Autenticación EPS","Consulta de suscripción"]},
+  "4G:sgwc": {"config_paths":["/etc/open5gs/sgwc.yaml"],"procedures":["Create Session","Modify Bearer"]},
+  "4G:sgwu": {"config_paths":["/etc/open5gs/sgwu.yaml"],"procedures":["Transporte S1-U"]},
+  "4G:smf": {"config_paths":["/etc/open5gs/smf.yaml"],"procedures":["Gestión de sesión EPC"]},
+  "4G:upf": {"config_paths":["/etc/open5gs/upf.yaml"],"procedures":["Plano de usuario SGi"]},
+  "4G:pcrf": {"config_paths":["/etc/open5gs/pcrf.yaml"],"procedures":["Políticas de sesión"]},
+  "4G:enb": {"config_paths":["/etc/srsran/enb.conf"],"procedures":["S1 Setup","RRC Connection"]},
+  "4G:ue": {"config_paths":["/etc/srsran/ue.conf"],"procedures":["Attach","EPS Bearer Setup"]}
+}

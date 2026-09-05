@@ -6,12 +6,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import router
 from app.core.config import get_settings
 from app.db import initialize
+from app.services.trace_tasks import trace_task_service
+from app.services.performance import metrics_collector
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     initialize()
+    await trace_task_service.initialize()
+    await metrics_collector.start()
     yield
+    await metrics_collector.stop()
+    await trace_task_service.shutdown()
 
 
 settings = get_settings()

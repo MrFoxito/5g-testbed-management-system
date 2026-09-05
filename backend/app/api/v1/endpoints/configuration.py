@@ -8,6 +8,39 @@ from app.services.configuration import ConfigurationError, configuration_service
 router = APIRouter(prefix="/config", tags=["configuration"])
 
 
+@router.get("/catalog/{scenario_id}")
+def catalog(scenario_id: str, _: UserPublic = Depends(current_user)):
+    try:
+        return configuration_service.catalog(scenario_id)
+    except KeyError:
+        raise HTTPException(404, f"Escenario no encontrado: {scenario_id}")
+
+
+@router.get("/declared")
+async def read_declared(
+    scenario_id: str,
+    component_id: str,
+    path: str,
+    _: UserPublic = Depends(current_user),
+):
+    try:
+        return await configuration_service.read_declared(scenario_id, component_id, path)
+    except KeyError:
+        raise HTTPException(404, f"Escenario no encontrado: {scenario_id}")
+    except (FileNotFoundError, ConfigurationError) as exc:
+        raise HTTPException(404 if isinstance(exc, FileNotFoundError) else 400, str(exc))
+
+
+@router.get("/validate/{scenario_id}")
+async def validate_scenario(scenario_id: str, _: UserPublic = Depends(current_user)):
+    try:
+        return await configuration_service.validate_scenario(scenario_id)
+    except KeyError:
+        raise HTTPException(404, f"Escenario no encontrado: {scenario_id}")
+    except Exception as exc:
+        raise HTTPException(500, f"Error durante la validación del escenario: {exc}")
+
+
 @router.get("")
 def read(path: str, _: UserPublic = Depends(current_user)):
     try:

@@ -1,12 +1,19 @@
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+TEST_ROOT = Path(tempfile.mkdtemp(prefix="ems-educativo-tests-"))
+
 os.environ["EMS_EXECUTION_MODE"] = "simulated"
-os.environ["EMS_DATABASE_PATH"] = str(Path("./data/test-ems.db"))
-os.environ["EMS_ALLOWED_CONFIG_ROOTS"] = '["./data/test-config"]'
+os.environ["EMS_ENABLE_REAL_CAPTURES"] = "false"
+os.environ["EMS_DATABASE_PATH"] = str(TEST_ROOT / "test-ems.db")
+os.environ["EMS_CAPTURE_DIR"] = str(TEST_ROOT / "captures")
+os.environ["EMS_BACKUP_DIR"] = str(TEST_ROOT / "backups")
+os.environ["EMS_ALLOWED_CONFIG_ROOTS"] = f'["{(TEST_ROOT / "config").as_posix()}"]'
+os.environ["EMS_ALLOWED_INTERFACES"] = '["lo","ogstun","any"]'
 
 from app.core.config import get_settings  # noqa: E402
 from app.main import app  # noqa: E402

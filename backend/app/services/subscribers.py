@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 
 from pymongo import MongoClient
@@ -13,6 +14,15 @@ def mask_secret(value: str | None) -> str | None:
 class SubscriberService:
     def __init__(self) -> None:
         self.memory: dict[str, dict] = {}
+
+    def _remote_mongosh(self, js_code: str) -> str:
+        from app.services.scenarios import scenario_manager
+        from app.services.execution import RemoteExecutionAdapter
+        adapter = scenario_manager.adapter
+        if isinstance(adapter, RemoteExecutionAdapter):
+            cmd = f'mongosh open5gs --quiet --eval "{js_code}"'
+            return adapter._execute_sync(cmd)
+        return ""
 
     def _collection(self):
         settings = get_settings()
@@ -42,12 +52,39 @@ class SubscriberService:
         return result
 
     def list(self) -> list[dict]:
+        settings = get_settings()
+        if settings.execution_mode == "remote":
+            try:
+                js = "JSON.stringify(db.subscribers.find().toArray())"
+                raw = self._remote_mongosh(js)
+                if raw.strip():
+                    docs = json.loads(raw.strip())
+                    return [self._public(doc) for doc in docs]
+            except Exception:
+                pass
+
         collection = self._collection()
         documents = list(collection.find({})) if collection is not None else list(self.memory.values())
         return [self._public(document) for document in documents]
 
     def create(self, item: SubscriberCreate) -> dict:
         document = self._document(item)
+        settings = get_settings()
+        if settings.execution_mode == "remote":
+            try:
+                check_js = f'db.subscribers.countDocuments({{imsi: "{item.imsi}"}})'
+                count = int(self._remote_mongosh(check_js).strip() or "0")
+                if count > 0:
+                    raise ValueError("El IMSI ya existe")
+                doc_json = json.dumps(document)
+                insert_js = f"db.subscribers.insertOne({doc_json})"
+                self._remote_mongosh(insert_js)
+                return self._public(document)
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise RuntimeError(f"Error creando suscriptor en MongoDB remoto: {exc}")
+
         collection = self._collection()
         if collection is not None:
             if collection.find_one({"imsi": item.imsi}):
@@ -60,6 +97,15 @@ class SubscriberService:
         return self._public(document)
 
     def delete(self, imsi: str) -> bool:
+        settings = get_settings()
+        if settings.execution_mode == "remote":
+            try:
+                del_js = f'db.subscribers.deleteOne({{imsi: "{imsi}"}}).deletedCount'
+                count = int(self._remote_mongosh(del_js).strip() or "0")
+                return count > 0
+            except Exception:
+                return False
+
         collection = self._collection()
         if collection is not None:
             return collection.delete_one({"imsi": imsi}).deleted_count == 1
