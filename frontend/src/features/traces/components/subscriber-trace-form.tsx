@@ -87,8 +87,8 @@ export function SubscriberTraceForm({
   const [proceduresTouched, setProceduresTouched] = useState(false)
   const [includeUserPlane, setIncludeUserPlane] = useState(true)
   const [includeSbi, setIncludeSbi] = useState(true)
-  const [autoTrigger, setAutoTrigger] = useState(false)
-  const [duration, setDuration] = useState('120')
+  const [autoTrigger, setAutoTrigger] = useState(true)
+  const [duration, setDuration] = useState('60')
   const [maxMegabytes, setMaxMegabytes] = useState('50')
 
   const subscribers = useQuery({
@@ -140,9 +140,7 @@ export function SubscriberTraceForm({
     capabilities?.quota?.max_megabytes ??
     capabilities?.limits?.max_megabytes ??
     100
-  const durationOptions = [60, 120, 300].filter(
-    (value) => value <= maxDuration
-  )
+  const durationOptions = [60, 120, 300].filter((value) => value <= maxDuration)
   const sizeOptions = [25, 50, 100].filter((value) => value <= maxSize)
   const autoTriggerAllowed =
     subscriberCapabilities?.supports_auto_trigger !== false &&
@@ -365,14 +363,14 @@ export function SubscriberTraceForm({
               />
               <ToggleOption
                 label='Mensajes SBI'
-                description='Incluye evidencia HTTP/2 entre las NFs.'
+                description='Incluye AUSF, UDM y N11 AMF–SMF; el ruido de mantenimiento se oculta.'
                 checked={includeSbi}
                 disabled={subscriberCapabilities?.supports_sbi === false}
                 onCheckedChange={setIncludeSbi}
               />
               <ToggleOption
                 label='Disparar procedimiento'
-                description='Reinicia el UE de forma controlada al iniciar.'
+                description='Recomendado: reinicia el UE para capturar un Registration nuevo.'
                 checked={effectiveAutoTrigger}
                 disabled={!autoTriggerAllowed}
                 onCheckedChange={setAutoTrigger}

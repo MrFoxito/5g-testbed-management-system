@@ -48,10 +48,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmsPage } from '@/features/ems-page'
 import { PerformanceChart } from './performance-chart'
 import { QueryWizard } from './query-wizard'
+import { ReportDialog } from './report-dialog'
+import { supportsObject } from './types'
 import type {
   Aggregation,
   KpiFolder,
@@ -67,7 +68,11 @@ const DEFAULT_COUNTERS = ['host.cpu.percent', 'host.memory.percent']
 export function PerformancePage() {
   const queryClient = useQueryClient()
   const [scenario, setScenario] = useState<'5g-sa' | '4g-epc'>('5g-sa')
-  const [objectIds, setObjectIds] = useState<string[]>([])
+  const [objectIds, setObjectIds] = useState<string[] | null>(null)
+  const [activeTitle, setActiveTitle] = useState('Recursos del testbed')
+  const [counterSearch, setCounterSearch] = useState('')
+  const [objectSearch, setObjectSearch] = useState('')
+  const [libraryOpen, setLibraryOpen] = useState(true)
   const [counterIds, setCounterIds] = useState<string[]>(DEFAULT_COUNTERS)
   const [rangeKey, setRangeKey] = useState<RangeKey>('1h')
   const [granularity, setGranularity] = useState(30)
@@ -100,11 +105,7 @@ export function PerformancePage() {
   })
 
   const defaultObject = catalog.data ? `testbed:${catalog.data.testbed_id}` : ''
-  const effectiveObjects = objectIds.length
-    ? objectIds
-    : defaultObject
-      ? [defaultObject]
-      : []
+  const effectiveObjects = objectIds ?? (defaultObject ? [defaultObject] : [])
   const draft: KpiQueryDraft = {
     scenario_id: scenario,
     object_ids: effectiveObjects,
@@ -190,7 +191,8 @@ export function PerformancePage() {
     setAggregation(next.aggregation)
   }
 
-  const loadSaved = (item: SavedKpiQuery) =>
+  const loadSaved = (item: SavedKpiQuery) => {
+    setActiveTitle(item.name)
     applyDraft({
       scenario_id: item.scenario_id as '5g-sa' | '4g-epc',
       object_ids: item.object_ids,
@@ -199,8 +201,18 @@ export function PerformancePage() {
       granularity_seconds: item.granularity_seconds,
       aggregation: item.aggregation,
     })
+  }
 
   const loadTelcoPreset = (kind: 'mobility' | 'session' | 'throughput') => {
+    setActiveTitle(
+      kind === 'throughput'
+        ? 'Throughput por interfaz'
+        : kind === 'mobility'
+          ? scenario === '5g-sa'
+            ? 'Registration 5G'
+            : 'Attach 4G'
+          : 'Sesiones de datos'
+    )
     if (kind === 'throughput') {
       const interfaces =
         catalog.data?.objects
@@ -260,35 +272,32 @@ export function PerformancePage() {
       ? current.filter((item) => item !== id)
       : [...current, id]
     setObjectIds(next)
-    const types = new Set(
-      catalog.data?.objects
-        .filter((item) => next.includes(item.id))
-        .map((item) => item.type)
-    )
-    setCounterIds((currentCounters) =>
-      currentCounters.filter((counterId) =>
-        catalog.data?.counters
-          .find((counter) => counter.id === counterId)
-          ?.objects.some((type) => types.has(type))
+    setActiveTitle('Consulta personalizada')
+    const counters = catalog.data?.counters ?? []
+    const kept = counterIds.filter((counterId) =>
+      counters.some(
+        (c) => c.id === counterId && next.some((obj) => supportsObject(c, obj))
       )
     )
+    setCounterIds(kept)
   }
 
   const toggleCounter = (id: string) =>
     setCounterIds((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
-        : [...current, id]
+        : current.length < 12
+          ? [...current, id]
+          : current
     )
 
-  const selectedTypes = new Set(
-    catalog.data?.objects
-      .filter((item) => effectiveObjects.includes(item.id))
-      .map((item) => item.type)
-  )
   const compatibleCounters =
-    catalog.data?.counters.filter((counter) =>
-      counter.objects.some((type) => selectedTypes.has(type))
+    catalog.data?.counters.filter(
+      (counter) =>
+        effectiveObjects.some((id) => supportsObject(counter, id)) &&
+        `${counter.label} ${counter.category} ${counter.native_name ?? ''}`
+          .toLowerCase()
+          .includes(counterSearch.toLowerCase())
     ) ?? []
   const objectGroups = useMemo(
     () => [...new Set(catalog.data?.objects.map((item) => item.group) ?? [])],
@@ -307,8 +316,9 @@ export function PerformancePage() {
           value={scenario}
           onValueChange={(value) => {
             setScenario(value as '5g-sa' | '4g-epc')
-            setObjectIds([])
+            setObjectIds(null)
             setCounterIds(DEFAULT_COUNTERS)
+            setActiveTitle('Recursos del testbed')
           }}
         >
           <SelectTrigger className='w-44'>
@@ -322,16 +332,25 @@ export function PerformancePage() {
       }
     >
       <div className='mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3'>
+        <Button variant='outline' onClick={() => setLibraryOpen(!libraryOpen)}>
+          <Folder /> Biblioteca
+        </Button>
         <Button onClick={() => setWizardOpen(true)}>
           <BarChart3 /> Nueva consulta
         </Button>
         <Button
           variant='outline'
           onClick={() => setSaveOpen(true)}
-          disabled={!counterIds.length}
+          disabled={!counterIds.length || !effectiveObjects.length}
         >
           <Save /> Guardar consulta
         </Button>
+        <ReportDialog
+          draft={draft}
+          title={activeTitle}
+          savedQueries={savedQueries.data ?? []}
+          disabled={!result.data?.series.length}
+        />
         <Button
           variant='outline'
           onClick={() => void result.refetch()}
@@ -359,94 +378,122 @@ export function PerformancePage() {
         </div>
       </div>
 
-      <div className='grid min-h-[670px] gap-4 xl:grid-cols-[270px_minmax(0,1fr)_340px]'>
-        <Card className='overflow-hidden py-0'>
-          <CardHeader className='border-b px-4 py-4'>
-            <div className='flex items-center justify-between'>
-              <CardTitle className='text-base'>Biblioteca KPI</CardTitle>
-              <Button
-                size='icon'
-                variant='ghost'
-                onClick={() => setFolderOpen(true)}
-                title='Nueva carpeta'
-              >
-                <FolderPlus />
-              </Button>
-            </div>
-            <div className='relative'>
-              <Search className='absolute top-2.5 left-3 size-4 text-muted-foreground' />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder='Buscar consulta…'
-                className='pl-9'
-              />
-            </div>
-          </CardHeader>
-          <ScrollArea className='h-[590px]'>
-            <CardContent className='space-y-2 p-3'>
-              <LibrarySection title='Plantillas EMS' icon={Gauge}>
-                <PresetItem
-                  label={scenario === '5g-sa' ? 'Registration 5G' : 'Attach 4G'}
-                  onClick={() => loadTelcoPreset('mobility')}
+      <div
+        className={`grid min-h-[670px] gap-3 ${libraryOpen ? 'xl:grid-cols-[220px_minmax(0,1fr)_300px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}
+      >
+        {libraryOpen && (
+          <Card className='overflow-hidden py-0'>
+            <CardHeader className='border-b px-4 py-4'>
+              <div className='flex items-center justify-between'>
+                <CardTitle className='text-base'>Biblioteca KPI</CardTitle>
+                <Button
+                  size='icon'
+                  variant='ghost'
+                  onClick={() => setFolderOpen(true)}
+                  title='Nueva carpeta'
+                >
+                  <FolderPlus />
+                </Button>
+              </div>
+              <div className='relative'>
+                <Search className='absolute top-2.5 left-3 size-4 text-muted-foreground' />
+                <Input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder='Buscar consulta…'
+                  className='pl-9'
                 />
-                <PresetItem
-                  label={scenario === '5g-sa' ? 'PDU Sessions' : 'EPS bearers'}
-                  onClick={() => loadTelcoPreset('session')}
-                />
-                <PresetItem
-                  label='Throughput por interfaz'
-                  onClick={() => loadTelcoPreset('throughput')}
-                />
-              </LibrarySection>
-              <LibrarySection title='Mis consultas' icon={UserRound}>
-                <QueryTree
-                  folders={folders.data ?? []}
-                  queries={
-                    savedQueries.data?.filter(
-                      (item) =>
-                        item.scope === 'personal' &&
-                        item.name.toLowerCase().includes(search.toLowerCase())
-                    ) ?? []
-                  }
-                  onLoad={loadSaved}
-                  onDelete={(id) => deleteQuery.mutate(id)}
-                />
-              </LibrarySection>
-              <LibrarySection title='Testbed compartido' icon={Share2}>
-                <QueryTree
-                  folders={
-                    folders.data?.filter((item) => item.scope === 'testbed') ??
-                    []
-                  }
-                  queries={
-                    savedQueries.data?.filter(
-                      (item) =>
-                        item.scope === 'testbed' &&
-                        item.name.toLowerCase().includes(search.toLowerCase())
-                    ) ?? []
-                  }
-                  onLoad={loadSaved}
-                  onDelete={(id) => deleteQuery.mutate(id)}
-                />
-              </LibrarySection>
-              {!savedQueries.data?.length && (
-                <div className='rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground'>
-                  Cree una consulta y guárdela en una carpeta personal o
-                  compartida.
-                </div>
-              )}
-            </CardContent>
-          </ScrollArea>
-        </Card>
+              </div>
+            </CardHeader>
+            <ScrollArea className='h-[590px]'>
+              <CardContent className='space-y-2 p-3'>
+                <LibrarySection title='Plantillas EMS' icon={Gauge}>
+                  <PresetItem
+                    label={
+                      scenario === '5g-sa' ? 'Registration 5G' : 'Attach 4G'
+                    }
+                    onClick={() => loadTelcoPreset('mobility')}
+                  />
+                  <PresetItem
+                    label={
+                      scenario === '5g-sa' ? 'PDU Sessions' : 'EPS bearers'
+                    }
+                    onClick={() => loadTelcoPreset('session')}
+                  />
+                  <PresetItem
+                    label='Throughput por interfaz'
+                    onClick={() => loadTelcoPreset('throughput')}
+                  />
+                </LibrarySection>
+                <LibrarySection title='Funciones de red' icon={Server}>
+                  {catalog.data?.objects
+                    .filter((o) => o.type === 'nf')
+                    .map((o) => (
+                      <PresetItem
+                        key={o.id}
+                        label={`${o.label} · ${o.counter_count ?? 1}`}
+                        onClick={() => {
+                          setActiveTitle(`${o.label} · Contadores de la NF`)
+                          setCounterSearch('')
+                          applyDraft({
+                            ...draft,
+                            object_ids: [o.id],
+                            counter_ids: [],
+                          })
+                        }}
+                      />
+                    ))}
+                </LibrarySection>
+                <LibrarySection title='Mis consultas' icon={UserRound}>
+                  <QueryTree
+                    folders={folders.data ?? []}
+                    queries={
+                      savedQueries.data?.filter(
+                        (item) =>
+                          item.scope === 'personal' &&
+                          item.name.toLowerCase().includes(search.toLowerCase())
+                      ) ?? []
+                    }
+                    onLoad={loadSaved}
+                    onDelete={(id) => deleteQuery.mutate(id)}
+                  />
+                </LibrarySection>
+                <LibrarySection title='Testbed compartido' icon={Share2}>
+                  <QueryTree
+                    folders={
+                      folders.data?.filter(
+                        (item) => item.scope === 'testbed'
+                      ) ?? []
+                    }
+                    queries={
+                      savedQueries.data?.filter(
+                        (item) =>
+                          item.scope === 'testbed' &&
+                          item.name.toLowerCase().includes(search.toLowerCase())
+                      ) ?? []
+                    }
+                    onLoad={loadSaved}
+                    onDelete={(id) => deleteQuery.mutate(id)}
+                  />
+                </LibrarySection>
+                {!savedQueries.data?.length && (
+                  <div className='rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground'>
+                    Cree una consulta y guárdela en una carpeta personal o
+                    compartida.
+                  </div>
+                )}
+              </CardContent>
+            </ScrollArea>
+          </Card>
+        )}
 
         <Card className='min-w-0 py-0'>
           <CardHeader className='border-b px-5 py-4'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <div>
                 <CardTitle className='flex items-center gap-2 text-base'>
-                  <LineChartIcon className='size-5 text-primary' /> Resultado de
-                  consulta
+                  <LineChartIcon className='size-5 text-primary' />{' '}
+                  {activeTitle}
                 </CardTitle>
                 <p className='mt-1 text-xs text-muted-foreground'>
                   {effectiveObjects.length} objetos · {counterIds.length}{' '}
@@ -493,7 +540,12 @@ export function PerformancePage() {
             </div>
           </CardHeader>
           <CardContent className='p-5'>
-            {result.isError ? (
+            {!effectiveObjects.length || !counterIds.length ? (
+              <div className='flex h-[440px] items-center justify-center rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground'>
+                Seleccione al menos un objeto y un contador compatible en el
+                panel derecho.
+              </div>
+            ) : result.isError ? (
               <div className='flex h-[440px] items-center justify-center rounded-md border border-destructive/40 bg-destructive/5 p-8 text-center text-sm text-destructive'>
                 {apiErrorMessage(
                   result.error,
@@ -503,6 +555,17 @@ export function PerformancePage() {
             ) : (
               <PerformanceChart result={result.data} />
             )}
+            {!!result.data?.missing_series?.length && (
+              <p className='mt-3 rounded border border-amber-500/30 p-2 text-xs text-amber-600'>
+                {result.data.missing_series.length} series sin muestras en este
+                periodo. No se sustituyen datos ausentes por cero.
+              </p>
+            )}
+            <p className='mt-3 text-xs text-muted-foreground'>
+              Los acumulados muestran la última lectura de cada intervalo. Las
+              tasas nativas usan deltas y omiten reinicios. Una NF compartida
+              mide el proceso completo.
+            </p>
             <div className='mt-4 grid gap-3 sm:grid-cols-3'>
               <MetricSummary
                 label='Muestras consultadas'
@@ -524,92 +587,128 @@ export function PerformancePage() {
         </Card>
 
         <Card className='overflow-hidden py-0'>
-          <Tabs defaultValue='objects' className='gap-0'>
-            <CardHeader className='border-b px-4 py-4'>
-              <CardTitle className='text-base'>Constructor</CardTitle>
-              <TabsList className='grid w-full grid-cols-2'>
-                <TabsTrigger value='objects'>Objetos</TabsTrigger>
-                <TabsTrigger value='counters'>Contadores</TabsTrigger>
-              </TabsList>
-            </CardHeader>
-            <TabsContent value='objects' className='m-0'>
-              <ScrollArea className='h-[590px]'>
-                <CardContent className='space-y-5 p-4'>
-                  {objectGroups.map((group) => (
-                    <SelectorGroup
-                      key={group}
-                      title={group}
-                      icon={group === 'Testbed' ? Server : Network}
-                    >
-                      {catalog.data?.objects
-                        .filter((item) => item.group === group)
-                        .map((item) => (
-                          <label
-                            key={item.id}
-                            className='flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-muted'
-                          >
-                            <Checkbox
-                              checked={effectiveObjects.includes(item.id)}
-                              onCheckedChange={() => toggleObject(item.id)}
-                            />
-                            <span className='min-w-0 flex-1 truncate text-sm'>
-                              {item.label}
-                            </span>
-                            {item.status && (
-                              <span
-                                className={`size-2 rounded-full ${item.status === 'running' || item.status === 'UP' ? 'bg-emerald-500' : 'bg-muted-foreground'}`}
-                              />
-                            )}
-                          </label>
-                        ))}
-                    </SelectorGroup>
-                  ))}
-                </CardContent>
-              </ScrollArea>
-            </TabsContent>
-            <TabsContent value='counters' className='m-0'>
-              <ScrollArea className='h-[590px]'>
-                <CardContent className='space-y-5 p-4'>
-                  {counterGroups.map((group) => (
-                    <SelectorGroup key={group} title={group} icon={Database}>
-                      {compatibleCounters
-                        .filter((item) => item.category === group)
-                        .map((item) => (
-                          <label
-                            key={item.id}
-                            className='flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted'
-                          >
-                            <Checkbox
-                              className='mt-0.5'
-                              checked={counterIds.includes(item.id)}
-                              onCheckedChange={() => toggleCounter(item.id)}
-                            />
-                            <span className='min-w-0 flex-1'>
-                              <span className='block text-sm'>
-                                {item.label}
-                              </span>
-                              <span className='text-xs text-muted-foreground'>
-                                {item.source}
-                              </span>
-                            </span>
-                            <Badge variant='secondary'>{item.unit}</Badge>
-                          </label>
-                        ))}
-                    </SelectorGroup>
-                  ))}
-                  {!compatibleCounters.length && (
-                    <p className='rounded-md border border-dashed p-4 text-sm text-muted-foreground'>
-                      Seleccione primero un objeto compatible.
-                    </p>
-                  )}
-                </CardContent>
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
+          <CardHeader className='border-b px-4 py-4'>
+            <CardTitle className='text-sm'>
+              Objetos{' '}
+              <span className='text-muted-foreground'>
+                / {effectiveObjects.length} seleccionados
+              </span>
+            </CardTitle>
+            <Input
+              value={objectSearch}
+              onChange={(e) => setObjectSearch(e.target.value)}
+              placeholder='Buscar nodo o interfaz'
+              aria-label='Buscar objetos'
+            />
+          </CardHeader>
+          <ScrollArea className='h-[250px]'>
+            <CardContent className='space-y-2 p-2'>
+              {objectGroups.map((group) => (
+                <SelectorGroup
+                  key={group}
+                  title={group}
+                  icon={group === 'Testbed' ? Server : Network}
+                >
+                  {catalog.data?.objects
+                    .filter(
+                      (item) =>
+                        item.group === group &&
+                        item.label
+                          .toLowerCase()
+                          .includes(objectSearch.toLowerCase())
+                    )
+                    .map((item) => (
+                      <label
+                        key={item.id}
+                        className='flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-muted'
+                      >
+                        <Checkbox
+                          checked={effectiveObjects.includes(item.id)}
+                          onCheckedChange={() => toggleObject(item.id)}
+                        />
+                        <span className='min-w-0 flex-1 truncate text-sm'>
+                          {item.label}
+                        </span>
+                        {item.counter_count && (
+                          <span className='text-[10px] text-muted-foreground'>
+                            {item.counter_count}
+                          </span>
+                        )}
+                        {item.status && (
+                          <span
+                            className={`size-2 rounded-full ${item.status === 'running' || item.status === 'UP' ? 'bg-emerald-500' : 'bg-muted-foreground'}`}
+                          />
+                        )}
+                      </label>
+                    ))}
+                </SelectorGroup>
+              ))}
+            </CardContent>
+          </ScrollArea>
+          <CardHeader className='border-y bg-muted/20 px-4 py-3'>
+            <CardTitle className='text-sm'>
+              Contadores{' '}
+              <span className='text-muted-foreground'>
+                / {counterIds.length} de 12
+              </span>
+            </CardTitle>
+            <Input
+              value={counterSearch}
+              onChange={(e) => setCounterSearch(e.target.value)}
+              placeholder='Buscar contador, causa, DNN…'
+              aria-label='Buscar contadores'
+            />
+            <p className='text-[11px] text-muted-foreground'>
+              {compatibleCounters.length} compatibles. Solo se ofrecen métricas
+              observadas; no se inventan contadores del fabricante.
+            </p>
+          </CardHeader>
+          <ScrollArea className='h-[370px]'>
+            <CardContent className='space-y-3 p-2'>
+              {counterGroups.map((group) => (
+                <SelectorGroup key={group} title={group} icon={Database}>
+                  {compatibleCounters
+                    .filter((item) => item.category === group)
+                    .map((item) => (
+                      <label
+                        key={item.id}
+                        title={`${item.description ?? item.label}${item.native_name ? '\n' + item.native_name : ''}${item.last_seen ? '\nÚltima muestra: ' + new Date(item.last_seen).toLocaleString() : ''}`}
+                        className='flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted'
+                      >
+                        <Checkbox
+                          className='mt-0.5'
+                          checked={counterIds.includes(item.id)}
+                          disabled={
+                            !counterIds.includes(item.id) &&
+                            counterIds.length >= 12
+                          }
+                          onCheckedChange={() => toggleCounter(item.id)}
+                        />
+                        <span className='min-w-0 flex-1'>
+                          <span className='block text-sm'>{item.label}</span>
+                          <span className='text-xs text-muted-foreground'>
+                            {item.source} ·{' '}
+                            {item.kind === 'counter'
+                              ? 'acumulado'
+                              : 'instantáneo'}
+                          </span>
+                        </span>
+                        <Badge variant='secondary'>{item.unit}</Badge>
+                      </label>
+                    ))}
+                </SelectorGroup>
+              ))}
+              {!compatibleCounters.length && (
+                <p className='rounded-md border border-dashed p-4 text-sm text-muted-foreground'>
+                  Seleccione primero un objeto compatible.
+                </p>
+              )}
+            </CardContent>
+          </ScrollArea>
         </Card>
       </div>
 
-      {catalog.data && (
+      {catalog.data && wizardOpen && (
         <QueryWizard
           open={wizardOpen}
           onOpenChange={setWizardOpen}

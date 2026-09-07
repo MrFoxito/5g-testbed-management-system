@@ -4,16 +4,13 @@ import {
   ArrowLeft,
   Braces,
   CheckCircle2,
-  Clock3,
   Download,
   FileJson,
   Fingerprint,
   GitBranch,
-  HardDrive,
   Maximize2,
   Minimize2,
   Network,
-  Radio,
   ShieldAlert,
   Square,
   Trash2,
@@ -41,6 +38,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { formatBytes, formatDuration, formatTimestamp } from '../format'
 import {
   isActiveTrace,
   traceKind,
@@ -59,7 +57,6 @@ import {
   TraceOutcomeBadge,
   TraceStatusBadge,
 } from './trace-status'
-import { formatBytes, formatDuration, formatTimestamp } from '../format'
 import { TraceTimeline } from './trace-timeline'
 
 type TraceTaskDetailProps = {
@@ -118,7 +115,7 @@ export function TraceTaskDetail({
         className={cn(
           'flex flex-col gap-0 p-0 transition-all duration-150',
           isFullscreen
-            ? '!fixed !inset-0 !top-0 !left-0 !transform-none !translate-x-0 !translate-y-0 !h-screen !max-h-screen !w-screen !max-w-none !rounded-none !border-none !z-50 overflow-hidden'
+            ? '!fixed !inset-0 !top-0 !left-0 !z-50 !h-screen !max-h-screen !w-screen !max-w-none !translate-x-0 !translate-y-0 !transform-none overflow-hidden !rounded-none !border-none'
             : 'h-[94vh] max-h-[94vh] w-[calc(100%-1rem)] max-w-none overflow-hidden sm:max-w-[min(1600px,calc(100%-2rem))]'
         )}
       >
@@ -131,10 +128,20 @@ export function TraceTaskDetail({
                   size='sm'
                   onClick={() => setIsFullscreen((prev) => !prev)}
                   className='gap-1.5'
-                  title={isFullscreen ? 'Salir de pantalla completa' : 'Ver en pantalla completa'}
+                  title={
+                    isFullscreen
+                      ? 'Salir de pantalla completa'
+                      : 'Ver en pantalla completa'
+                  }
                 >
-                  {isFullscreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
-                  <span className='hidden sm:inline'>{isFullscreen ? 'Salir' : 'Pantalla completa'}</span>
+                  {isFullscreen ? (
+                    <Minimize2 className='h-4 w-4' />
+                  ) : (
+                    <Maximize2 className='h-4 w-4' />
+                  )}
+                  <span className='hidden sm:inline'>
+                    {isFullscreen ? 'Salir' : 'Pantalla completa'}
+                  </span>
                 </Button>
                 <DialogTitle className='truncate text-xl'>
                   {task?.name ?? 'Detalle de tarea'}
@@ -227,7 +234,7 @@ export function TraceTaskDetail({
               <DetailSkeleton />
             ) : (
               <>
-                <SummaryCards task={task} analysis={analysis} />
+                <TraceSummaryBar task={task} analysis={analysis} />
 
                 {traceKind(task) === 'subscriber' && (
                   <IdentifierChain
@@ -322,71 +329,60 @@ export function TraceTaskDetail({
   )
 }
 
-function SummaryCards({
+function TraceSummaryBar({
   task,
   analysis,
 }: {
   task: TraceTask
   analysis?: TraceAnalysis
 }) {
-  const cards = [
-    {
-      label: 'Modalidad',
-      value:
-        traceKind(task) === 'subscriber'
-          ? 'Subscriber Trace'
-          : 'Interface Trace',
-      detail:
-        traceKind(task) === 'subscriber'
-          ? `${(task.identifier_type ?? 'IMSI').toUpperCase()} ${maskIdentifier(task.identifier_masked ?? task.identifier, task.identifier_type)}`
-          : (task.capture_point_label ??
-            task.capture_point?.toUpperCase() ??
-            'Punto de captura'),
-      icon: Radio,
-    },
-    {
-      label: 'Duración',
-      value: formatDuration(task.duration_seconds),
-      detail: `${formatTimestamp(task.started_at ?? task.created_at)} · ${formatTimestamp(task.completed_at)}`,
-      icon: Clock3,
-    },
-    {
-      label: 'Evidencia',
-      value: `${task.packet_count ?? 0} paquetes`,
-      detail: `${formatBytes(task.size_bytes)} · ${analysis?.events?.length ?? task.event_count ?? 0} eventos`,
-      icon: HardDrive,
-    },
-    {
-      label: 'Correlación',
-      value: correlationLabel(analysis?.correlation_status),
-      detail: analysis?.analysis_version
-        ? `Motor ${analysis.analysis_version}`
-        : 'Basada en evidencia disponible',
-      icon: Fingerprint,
-    },
-  ]
+  const mode =
+    traceKind(task) === 'subscriber' ? 'Subscriber Trace' : 'Interface Trace'
+  const targetKind =
+    task.target?.kind ??
+    analysis?.target?.kind ??
+    task.identifier_type ??
+    'IMSI'
+  const targetValue =
+    task.target?.masked ??
+    analysis?.target?.masked ??
+    task.identifier_masked ??
+    task.identifier
+  const target =
+    traceKind(task) === 'subscriber'
+      ? `${targetKind.toUpperCase()} ${maskIdentifier(targetValue, targetKind)}`
+      : (task.capture_point_label ??
+        task.capture_point?.toUpperCase() ??
+        'Punto de captura')
   return (
-    <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-      {cards.map((card) => (
-        <Card key={card.label}>
-          <CardContent className='flex items-start justify-between gap-3 pt-5'>
-            <div className='min-w-0'>
-              <p className='text-xs font-medium text-muted-foreground'>
-                {card.label}
-              </p>
-              <p className='mt-1 truncate text-lg font-semibold'>
-                {card.value}
-              </p>
-              <p className='mt-1 truncate text-xs text-muted-foreground'>
-                {card.detail}
-              </p>
-            </div>
-            <div className='rounded-md bg-muted p-2'>
-              <card.icon className='size-4 text-muted-foreground' />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+    <div className='flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border bg-card px-3 py-2 text-xs shadow-xs'>
+      <span className='font-semibold'>{mode}</span>
+      <span className='max-w-52 truncate font-mono text-muted-foreground'>
+        {target}
+      </span>
+      <span className='hidden h-4 w-px bg-border sm:block' />
+      <span
+        title={`${formatTimestamp(task.started_at ?? task.created_at)} - ${formatTimestamp(task.completed_at)}`}
+      >
+        <strong>{formatDuration(task.duration_seconds)}</strong>
+      </span>
+      <span className='text-muted-foreground'>
+        <strong className='text-foreground'>{task.packet_count ?? 0}</strong>{' '}
+        paquetes
+      </span>
+      <span className='text-muted-foreground'>
+        <strong className='text-foreground'>
+          {analysis?.events?.length ?? task.event_count ?? 0}
+        </strong>{' '}
+        eventos
+      </span>
+      <span className='text-muted-foreground'>
+        {formatBytes(task.size_bytes)}
+      </span>
+      <Badge variant='outline' className='ml-auto gap-1'>
+        <Fingerprint className='size-3' />
+        IDs: {correlationLabel(analysis?.correlation_status)}
+      </Badge>
     </div>
   )
 }
@@ -400,33 +396,41 @@ function IdentifierChain({
 }) {
   if (!identifiers.length) {
     return (
-      <Card>
-        <CardContent className='pt-5'>
-          <EmptyState
-            title='Identificadores aún no correlacionados'
-            description='El motor mostrará aquí la relación SUPI/IMSI → NGAP IDs → PDU Session → SEID → TEID → IP UE.'
-          />
-        </CardContent>
-      </Card>
+      <div className='rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground'>
+        <Fingerprint className='mr-2 inline size-3.5' />
+        Identificadores aún no correlacionados
+      </div>
     )
   }
+  const primary = identifiers[0]
   return (
-    <Card>
-      <CardHeader className='flex-row items-center justify-between'>
-        <CardTitle className='flex items-center gap-2 text-base'>
-          <Fingerprint className='size-4 text-primary' /> Cadena de
-          identificadores
-        </CardTitle>
+    <details className='group rounded-lg border bg-card shadow-xs'>
+      <summary className='flex cursor-pointer list-none flex-wrap items-center gap-2 px-3 py-2 text-xs select-none'>
+        <Fingerprint className='size-3.5 text-primary' />
+        <span className='font-semibold'>Identificadores correlacionados</span>
+        <span className='font-mono text-muted-foreground'>
+          {primary.label ?? identifierLabel(primary.kind ?? primary.type)}{' '}
+          {maskIdentifier(
+            primary.masked_value ?? primary.value,
+            primary.kind ?? primary.type
+          )}
+        </span>
+        <Badge variant='secondary'>{identifiers.length}</Badge>
         <Badge
           variant='outline'
           className={cn(
+            'ml-auto',
             status === 'complete' && 'border-emerald-500/40 text-emerald-600'
           )}
         >
           {correlationLabel(status)}
         </Badge>
-      </CardHeader>
-      <CardContent>
+        <span className='text-muted-foreground group-open:hidden'>Mostrar</span>
+        <span className='hidden text-muted-foreground group-open:inline'>
+          Ocultar
+        </span>
+      </summary>
+      <div className='border-t px-3 pt-3'>
         <div className='flex items-stretch gap-2 overflow-x-auto pb-2'>
           {identifiers.map((identifier, index) => (
             <div
@@ -467,8 +471,8 @@ function IdentifierChain({
             </div>
           ))}
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </details>
   )
 }
 
@@ -752,9 +756,7 @@ function ArtifactRow({
   artifacts: TraceArtifact[]
   onDownload: TraceTaskDetailProps['onDownload']
 }) {
-  const artifact = artifacts.find(
-    (item) => (item.kind ?? item.id) === kind
-  )
+  const artifact = artifacts.find((item) => (item.kind ?? item.id) === kind)
   const available = artifact
     ? artifact.available !== false
     : kind === 'original' || traceKind(task) === 'subscriber'
@@ -810,27 +812,168 @@ function SelectedEventCard({
   event: TraceEvent
   onOpenTimeline: () => void
 }) {
+  const source = eventEndpointDisplay(event.source, event.source_nf)
+  const target = eventEndpointDisplay(event.target, event.target_nf)
+  const identifiers = event.identifiers ?? []
   return (
-    <Card className='mt-4'>
-      <CardContent className='pt-5'>
-        <div className='flex flex-wrap items-center gap-2'>
+    <Card className='mt-4 overflow-hidden border-sky-500/25'>
+      <div className='flex flex-col gap-3 border-b bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div className='min-w-0'>
+          <p className='text-[10px] font-semibold tracking-[.14em] text-muted-foreground uppercase'>
+            Mensaje seleccionado
+          </p>
+          <p className='mt-1 truncate font-mono text-sm font-semibold'>
+            {event.message}
+          </p>
+        </div>
+        <div className='flex shrink-0 flex-wrap items-center gap-2'>
           <Badge>{event.protocol?.toUpperCase() ?? 'EVENTO'}</Badge>
-          <EvidenceBadge type={event.evidence_type} />
-          {(event.frame_number ?? event.packet_number) != null && (
+          {(event.interface_3gpp ?? event.interface) && (
             <Badge variant='outline'>
-              Frame #{event.frame_number ?? event.packet_number}
+              {event.interface_3gpp ?? event.interface}
             </Badge>
           )}
+          <EvidenceBadge type={event.evidence_type} />
         </div>
-        <p className='mt-3 font-medium'>{event.message}</p>
-        {event.evidence && (
-          <p className='mt-2 font-mono text-xs text-muted-foreground'>
-            {event.evidence}
-          </p>
-        )}
+      </div>
+      <CardContent className='p-0'>
+        <div className='grid xl:grid-cols-[.78fr_1.22fr]'>
+          <div className='border-b xl:border-r xl:border-b-0'>
+            <DecodeRow
+              label='Timestamp'
+              value={eventTimestamp(event.timestamp)}
+            />
+            <DecodeRow
+              label='Enlace'
+              value={`${source.label} → ${target.label}`}
+            />
+            <DecodeRow label='Origen' value={source.endpoint} mono />
+            <DecodeRow label='Destino' value={target.endpoint} mono />
+            <DecodeRow
+              label='Procedimiento'
+              value={event.procedure ?? 'No clasificado'}
+            />
+            <DecodeRow label='Estado' value={event.status ?? 'info'} />
+            <DecodeRow
+              label='Frame'
+              value={String(
+                event.frame_number ?? event.packet_number ?? 'No asociado'
+              )}
+              mono
+            />
+          </div>
+          <div className='p-4'>
+            <div className='mb-3 flex items-center justify-between gap-3'>
+              <p className='text-xs font-semibold tracking-wide uppercase'>
+                Información decodificada
+              </p>
+              <Badge variant='secondary'>
+                {identifiers.length} identificadores
+              </Badge>
+            </div>
+            {identifiers.length ? (
+              <div className='mb-4 grid gap-2 sm:grid-cols-2'>
+                {identifiers.map((identifier, index) => (
+                  <div
+                    key={`${identifier.kind ?? identifier.type}:${index}`}
+                    className='rounded-md border bg-background px-3 py-2'
+                  >
+                    <p className='text-[9px] font-semibold tracking-wide text-muted-foreground uppercase'>
+                      {identifier.label ??
+                        identifierLabel(identifier.kind ?? identifier.type)}
+                    </p>
+                    <p className='mt-1 font-mono text-xs'>
+                      {maskIdentifier(
+                        identifier.masked_value ?? identifier.value,
+                        identifier.kind ?? identifier.type
+                      )}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className='mb-4 text-xs text-muted-foreground'>
+                Este mensaje no contiene identificadores correlacionables
+                expuestos por el decodificador.
+              </p>
+            )}
+            <details
+              className='group rounded-md border bg-slate-950 text-slate-200'
+              open
+            >
+              <summary className='cursor-pointer border-b border-slate-800 px-3 py-2 font-mono text-[10px] font-semibold text-sky-300 select-none'>
+                Evidencia de decodificación
+              </summary>
+              <pre className='max-h-52 overflow-auto p-3 font-mono text-[10px] leading-relaxed break-words whitespace-pre-wrap'>
+                {event.evidence ??
+                  buildEventEvidence(event, source.endpoint, target.endpoint)}
+              </pre>
+            </details>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
+}
+
+function DecodeRow({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: string
+  mono?: boolean
+}) {
+  return (
+    <div className='grid grid-cols-[7.5rem_1fr] border-b last:border-b-0'>
+      <div className='bg-muted/35 px-3 py-2 text-[10px] font-semibold text-muted-foreground'>
+        {label}
+      </div>
+      <div
+        className={cn(
+          'min-w-0 px-3 py-2 text-xs break-all',
+          mono && 'font-mono'
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function eventEndpointDisplay(
+  endpoint: TraceEvent['source'],
+  fallback?: string
+) {
+  if (typeof endpoint === 'object') {
+    const label =
+      endpoint.label ?? endpoint.nf ?? endpoint.id ?? fallback ?? 'NF'
+    const address = endpoint.address
+      ? `${endpoint.address}${endpoint.port ? `:${endpoint.port}` : ''}`
+      : label
+    return { label, endpoint: address }
+  }
+  const label = endpoint ?? fallback ?? 'Desconocido'
+  return { label, endpoint: label }
+}
+
+function eventTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${date.toLocaleString([], { hour12: false })}.${String(date.getMilliseconds()).padStart(3, '0')}`
+}
+
+function buildEventEvidence(event: TraceEvent, source: string, target: string) {
+  return [
+    `Message: ${event.message}`,
+    `Protocol: ${event.protocol ?? 'unknown'}`,
+    `3GPP interface: ${event.interface_3gpp ?? event.interface ?? 'unknown'}`,
+    `Source: ${source}`,
+    `Destination: ${target}`,
+    `Procedure: ${event.procedure ?? 'unclassified'}`,
+    `Evidence type: ${event.evidence_type ?? 'unknown'}`,
+  ].join('\n')
 }
 
 function MetadataRow({ label, value }: { label: string; value: string }) {
@@ -948,17 +1091,12 @@ function shortId(id: string) {
 function DetailSkeleton() {
   return (
     <div className='animate-pulse space-y-4'>
-      <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-        {[1, 2, 3, 4].map((item) => (
-          <div key={item} className='h-28 rounded-xl bg-muted' />
-        ))}
-      </div>
-      <div className='h-36 rounded-xl bg-muted' />
+      <div className='h-10 rounded-lg bg-muted' />
+      <div className='h-10 rounded-lg bg-muted' />
       <div className='h-96 rounded-xl bg-muted' />
     </div>
   )
 }
-
 
 export type TraceTaskDetailViewProps = {
   task?: TraceTask
@@ -1008,7 +1146,7 @@ export function TraceTaskDetailView({
   return (
     <div className='flex flex-col gap-5'>
       {/* Barra Superior con Navegación y Acciones */}
-      <div className='flex flex-col gap-4 rounded-xl border bg-card p-4 sm:p-5 shadow-xs lg:flex-row lg:items-center lg:justify-between'>
+      <div className='flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs sm:p-5 lg:flex-row lg:items-center lg:justify-between'>
         <div className='min-w-0'>
           <div className='flex flex-wrap items-center gap-2.5'>
             <Button
@@ -1038,7 +1176,9 @@ export function TraceTaskDetailView({
             {task?.owner && (
               <>
                 <span>·</span>
-                <span>creada por <strong>{task.owner}</strong></span>
+                <span>
+                  creada por <strong>{task.owner}</strong>
+                </span>
               </>
             )}
             {task?.created_at && (
@@ -1065,7 +1205,11 @@ export function TraceTaskDetailView({
             {!isActiveTrace(task) && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant='outline' size='sm' className='gap-1.5 font-semibold shadow-xs'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='gap-1.5 font-semibold shadow-xs'
+                  >
                     <Download className='h-4 w-4' /> Descargar
                   </Button>
                 </DropdownMenuTrigger>
@@ -1111,7 +1255,7 @@ export function TraceTaskDetailView({
         <DetailSkeleton />
       ) : (
         <div className='space-y-5'>
-          <SummaryCards task={task} analysis={analysis} />
+          <TraceSummaryBar task={task} analysis={analysis} />
 
           {traceKind(task) === 'subscriber' && (
             <IdentifierChain
@@ -1125,8 +1269,8 @@ export function TraceTaskDetailView({
               <ShieldAlert />
               <AlertTitle>El análisis no está disponible</AlertTitle>
               <AlertDescription>
-                {analysisError.message}. El PCAP original y los metadatos
-                de captura siguen disponibles.
+                {analysisError.message}. El PCAP original y los metadatos de
+                captura siguen disponibles.
               </AlertDescription>
             </Alert>
           )}
@@ -1142,7 +1286,9 @@ export function TraceTaskDetailView({
                 </TabsTrigger>
                 <TabsTrigger value='timeline' className='gap-1.5 font-medium'>
                   <GitBranch className='h-4 w-4 text-violet-500' /> Timeline{' '}
-                  <Badge variant='secondary' className='ml-1 text-[10px]'>{events.length}</Badge>
+                  <Badge variant='secondary' className='ml-1 text-[10px]'>
+                    {events.length}
+                  </Badge>
                 </TabsTrigger>
                 <TabsTrigger value='evidence' className='gap-1.5 font-medium'>
                   <Braces className='h-4 w-4 text-amber-500' /> Evidencia 3GPP

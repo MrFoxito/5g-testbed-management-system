@@ -3,11 +3,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import current_user, operator_user
 from app.db import add_audit
 from app.models import UserPublic
 from app.services.performance import metrics_collector, performance_repository, performance_service
+from app.services.performance_reports import build_report
 
 
 router = APIRouter(prefix="/performance", tags=["performance"])
@@ -39,6 +41,25 @@ class SavedQueryCreate(PerformanceQuery):
     name: str = Field(min_length=3, max_length=80)
     folder_id: str | None = None
     scope: Literal["personal", "testbed"] = "personal"
+
+
+class ReportQuery(PerformanceQuery):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class ReportRequest(BaseModel):
+    title: str = Field(default="Informe de rendimiento del testbed", min_length=1, max_length=120)
+    queries: list[ReportQuery] = Field(min_length=1, max_length=6)
+
+
+@router.post("/report")
+async def report(payload: ReportRequest, user: UserPublic = Depends(current_user)):
+    try:
+        document = await run_in_threadpool(build_report, payload, user)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    add_audit(user.username, user.role, user.testbed, "performance.report", {"queries": len(payload.queries)}, "success")
+    return Response(document, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers={"Content-Disposition": 'attachment; filename="EMS-Performance.docx"'})
 
 
 @router.get("/catalog/{scenario_id}")

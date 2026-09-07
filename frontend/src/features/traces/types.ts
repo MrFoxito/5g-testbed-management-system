@@ -138,6 +138,11 @@ export type TraceTask = {
   identifier_type?: string
   identifier?: string
   identifier_masked?: string
+  target?: {
+    kind?: string
+    masked?: string
+    matched?: boolean
+  }
   include_user_plane?: boolean
   include_sbi?: boolean
   auto_trigger?: boolean
@@ -257,6 +262,11 @@ export type TraceAnalysis = {
   outcome?: TraceOutcome | string
   correlation_status?: 'complete' | 'partial' | 'insufficient' | string
   summary?: string
+  target?: {
+    kind?: string
+    masked?: string
+    matched?: boolean
+  }
   identifiers?: TraceIdentifier[]
   relations?: TraceIdentifierRelation[]
   procedures?: TraceProcedure[]

@@ -115,6 +115,12 @@ def _first_address(value: str | None) -> str:
     return values[0] if values else ""
 
 
+def _sbi_nf_for_address(address: str, fallback: str = "5GC NF") -> str:
+    """Resolve an SBI endpoint without ever presenting a RAN node as an NF."""
+    resolved = ADDRESS_TO_NF.get(address, fallback)
+    return fallback if resolved in {"gNB", "eNB", "UE"} else resolved
+
+
 def _protocol_and_interface(protocol_text: str, row: dict[str, str]) -> tuple[str, str]:
     upper = protocol_text.upper()
     if "NGAP" in upper or row.get("ngap.RAN_UE_NGAP_ID"):
@@ -226,7 +232,24 @@ def _clean_nas_name(info: str) -> str:
     parts = [p.strip() for p in info.split(",") if p.strip()]
     for p in parts:
         low = p.lower()
-        if any(k in low for k in ["registration request", "registration accept", "authentication request", "authentication response", "security mode command", "security mode complete", "pdu session", "deregistration", "initialuemessage"]):
+        if any(
+            key in low
+            for key in [
+                "registration request",
+                "registration accept",
+                "registration complete",
+                "authentication request",
+                "authentication response",
+                "security mode command",
+                "security mode complete",
+                "pdu session",
+                "deregistration",
+            ]
+        ):
+            return p
+    for p in parts:
+        low = p.lower()
+        if "initialuemessage" in low:
             return p
     return parts[-1] if parts else info
 
@@ -238,9 +261,10 @@ def _parse_sbi_call(row: dict[str, str], src_ip: str, dst_ip: str) -> tuple[str,
     method = row.get("http2.headers.method") or ""
     p = path.lower()
 
-    source_nf = ADDRESS_TO_NF.get(src_ip, "AMF")
-    target_nf = ADDRESS_TO_NF.get(dst_ip, "NRF")
+    source_nf = _sbi_nf_for_address(src_ip)
+    target_nf = _sbi_nf_for_address(dst_ip, "NRF")
     procedure = "control-plane"
+    interface = "SBI"
 
     if "nausf-auth" in p:
         source_nf, target_nf = "AMF", "AUSF"
@@ -270,6 +294,8 @@ def _parse_sbi_call(row: dict[str, str], src_ip: str, dst_ip: str) -> tuple[str,
         action = "Release" if "release" in p else "Modify" if "modify" in p else "Create"
         clean_msg = f"Nsmf_PDUSession {action} Context"
         procedure = "pdu-session"
+        # N11 is the 3GPP service-based interface between AMF and SMF.
+        interface = "N11 / SBI"
     elif "npcf-smpolicycontrol" in p:
         source_nf, target_nf = "SMF", "PCF"
         clean_msg = "Npcf_SMPolicyControl (SM Policy)"
@@ -278,13 +304,13 @@ def _parse_sbi_call(row: dict[str, str], src_ip: str, dst_ip: str) -> tuple[str,
         source_nf, target_nf = "AMF", "NRF"
         clean_msg = "Nnrf_NFDiscovery Request"
     elif "nnrf-nfm" in p:
-        source_nf = ADDRESS_TO_NF.get(src_ip, "AMF")
+        source_nf = _sbi_nf_for_address(src_ip)
         target_nf = "NRF"
         clean_msg = f"Nnrf_NFManagement ({method or 'HEARTBEAT'})"
     else:
         clean_msg = f"SBI {method} {path.split('/')[-1]}"
 
-    return source_nf, target_nf, clean_msg, "SBI", procedure
+    return source_nf, target_nf, clean_msg, interface, procedure
 
 
 def _is_registration_start(event: dict[str, Any]) -> bool:
@@ -337,6 +363,38 @@ def _scope_subscriber_events(
         if event["procedure"] in requested or event.get("identifiers"):
             scoped.append(event)
     return scoped
+
+
+def _deduplicate_loopback_sbi(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse the duplicate copy Linux `any` emits for loopback SBI traffic."""
+    result: list[dict[str, Any]] = []
+    last_by_key: dict[tuple[str, ...], dict[str, Any]] = {}
+    for event in events:
+        if event["protocol"] != "HTTP/2":
+            result.append(event)
+            continue
+        key = (
+            event["source_nf"],
+            event["target_nf"],
+            event["protocol"],
+            event["message"],
+            event["procedure"],
+        )
+        previous = last_by_key.get(key)
+        if previous and event["_epoch"] - previous["_epoch"] <= 0.003:
+            known = {
+                (item["kind"], item["value"])
+                for item in previous.get("identifiers", [])
+            }
+            previous.setdefault("identifiers", []).extend(
+                item
+                for item in event.get("identifiers", [])
+                if (item["kind"], item["value"]) not in known
+            )
+            continue
+        result.append(event)
+        last_by_key[key] = event
+    return result
 
 
 def _rebuild_identifier_chain(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -426,12 +484,25 @@ def build_trace_analysis(
         dst_ip = _first_address(row.get("ip.dst") or row.get("ipv6.dst"))
         source_nf = _nf_for_address(src_ip, protocol=protocol, source=True)
         target_nf = _nf_for_address(dst_ip, protocol=protocol, source=False)
+        if "NGAP" in protocol or "NAS" in protocol:
+            info = _clean_nas_name(info)
         procedure = _procedure(info, protocol)
 
         sbi = _parse_sbi_call(row, src_ip, dst_ip)
         if sbi:
             source_nf, target_nf, info, interface, procedure = sbi
             protocol = "HTTP/2"
+        elif protocol == "HTTP/2" and any(
+            marker in info.lower()
+            for marker in (
+                "data[",
+                "headers[",
+                "204 no content",
+                "window_update",
+                "settings",
+            )
+        ):
+            continue
 
         frame_number = int(row["frame.number"]) if row.get("frame.number", "").isdigit() else None
         event_id = f"packet-{frame_number or len(events) + 1}"
@@ -524,6 +595,7 @@ def build_trace_analysis(
         target_required=target_required,
         requested=list(task.get("procedures") or []),
     )
+    events = _deduplicate_loopback_sbi(events)
     if events:
         scoped_start = events[0]["_epoch"]
         for ordinal, event in enumerate(events, start=1):
@@ -589,7 +661,7 @@ def build_trace_analysis(
         result = "inconclusive"
     elif has_failures:
         result = "procedure_failure"
-    elif not missing and len(successful_procedures) == len(procedure_results):
+    elif procedure_results and len(successful_procedures) == len(procedure_results):
         result = "success"
     else:
         result = "partial"

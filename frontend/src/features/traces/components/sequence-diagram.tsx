@@ -1,13 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
 import {
+  ArrowDown,
+  ArrowUp,
   Filter,
   Layers,
   RotateCcw,
   Search,
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
-  ChevronUp,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
@@ -22,7 +20,9 @@ import {
 } from '../types'
 import { EmptyState } from './trace-status'
 
-const PARTICIPANT_WIDTH = 118
+const PARTICIPANT_WIDTH = 156
+const TIME_GUTTER_WIDTH = 184
+const HEADER_HEIGHT = 48
 const CANONICAL_ORDER = [
   'ue',
   'gnb',
@@ -41,55 +41,8 @@ const CANONICAL_ORDER = [
   'sgwu',
   'dn',
 ]
-
-function isPureTcpAck(event: TraceEvent) {
-  const msg = (event.message || '').toLowerCase()
-  const proto = (event.protocol || '').toLowerCase()
-
-  // Descartar fragmentos internos HTTP/2, ráfagas de control de flujo y heartbeats de demonios
-  if (
-    msg.includes('heartbeat') ||
-    msg.includes('data[') ||
-    msg.includes('headers[') ||
-    msg.includes('window_update') ||
-    msg.includes('magic') ||
-    msg.includes('settings') ||
-    (msg.includes('nnrf') && msg.includes('status'))
-  ) {
-    return true
-  }
-
-  // Si contiene indicadores explícitos de 3GPP, SBI o ICMP, no es un ACK puro de transporte
-  if (
-    proto.includes('ngap') ||
-    proto.includes('nas') ||
-    proto.includes('pfcp') ||
-    proto.includes('gtp') ||
-    proto.includes('icmp') ||
-    proto.includes('http') ||
-    proto.includes('sbi') ||
-    proto.includes('radio') ||
-    msg.includes('registration') ||
-    msg.includes('authenticat') ||
-    msg.includes('security') ||
-    msg.includes('session') ||
-    msg.includes('ping') ||
-    msg.includes('initial') ||
-    msg.includes('release') ||
-    msg.includes('pdu') ||
-    msg.includes('nausf') ||
-    msg.includes('nudm') ||
-    msg.includes('nudr') ||
-    msg.includes('nsmf') ||
-    msg.includes('npcf')
-  ) {
-    return false
-  }
-  return (
-    (msg.includes('[ack]') || msg.includes('[psh, ack]') || proto === 'tcp') &&
-    (msg.includes('seq=') || msg.includes('ack=') || msg.includes('win='))
-  )
-}
+type FilterMode = 'telco' | 'all'
+type Density = 'normal' | 'compact'
 
 export function SequenceDiagram({
   events,
@@ -102,56 +55,38 @@ export function SequenceDiagram({
   selectedEventId?: string
   onSelectEvent?: (event: TraceEvent) => void
 }) {
-  const [filterMode, setFilterMode] = useState<'telco' | 'all'>('telco')
+  const [filterMode, setFilterMode] = useState<FilterMode>('telco')
   const [searchTerm, setSearchTerm] = useState('')
-  const [density, setDensity] = useState<'normal' | 'compact'>('normal')
-  const [procedureFilter, setProcedureFilter] = useState<string>('all')
+  const [density, setDensity] = useState<Density>('normal')
+  const [procedureFilter, setProcedureFilter] = useState('all')
   const [zoomLevel, setZoomLevel] = useState(1)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-
+  const scrollRef = useRef<HTMLDivElement>(null)
   const participantList = useMemo(
     () => buildParticipants(events, participants),
     [events, participants]
   )
-
-  const eventHeight = density === 'normal' ? 54 : 36
-
   const filteredEvents = useMemo(() => {
     let result = [...events].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-
-    if (filterMode === 'telco') {
-      result = result.filter((e) => !isPureTcpAck(e))
-    }
-
-    if (procedureFilter !== 'all') {
-      result = result.filter((e) => {
-        if (procedureFilter === 'registration') {
-          return e.procedure === 'registration' || (e.message && e.message.toLowerCase().includes('registration'))
-        }
-        if (procedureFilter === 'authentication') {
-          return e.procedure === 'authentication' || (e.message && (e.message.toLowerCase().includes('authenticat') || e.message.toLowerCase().includes('security')))
-        }
-        if (procedureFilter === 'pdu-session') {
-          return e.procedure === 'pdu-session' || (e.message && (e.message.toLowerCase().includes('pdu') || e.message.toLowerCase().includes('pfcp')))
-        }
-        if (procedureFilter === 'user-plane') {
-          return e.procedure === 'user-plane' || (e.message && (e.message.toLowerCase().includes('ping') || e.message.toLowerCase().includes('icmp') || e.message.toLowerCase().includes('gtp')))
-        }
-        return true
-      })
-    }
-
-    if (searchTerm.trim()) {
-      const query = searchTerm.toLowerCase().trim()
-      result = result.filter(
-        (e) =>
-          (e.message && e.message.toLowerCase().includes(query)) ||
-          (e.protocol && e.protocol.toLowerCase().includes(query)) ||
-          (e.procedure && e.procedure.toLowerCase().includes(query)) ||
-          (e.interface_3gpp && e.interface_3gpp.toLowerCase().includes(query))
+    if (filterMode === 'telco')
+      result = result.filter((event) => !isNoise(event))
+    if (procedureFilter !== 'all')
+      result = result.filter((event) =>
+        matchesProcedure(event, procedureFilter)
+      )
+    const query = searchTerm.trim().toLowerCase()
+    if (query) {
+      result = result.filter((event) =>
+        [
+          event.message,
+          event.protocol,
+          event.procedure,
+          event.interface_3gpp,
+          event.interface,
+          event.source_nf,
+          event.target_nf,
+        ].some((value) => value?.toLowerCase().includes(query))
       )
     }
-
     return result.slice(0, 500)
   }, [events, filterMode, procedureFilter, searchTerm])
 
@@ -164,10 +99,13 @@ export function SequenceDiagram({
     )
   }
 
-  const baseWidth = Math.max(participantList.length * PARTICIPANT_WIDTH, 750)
-  const width = baseWidth * zoomLevel
-  const height = Math.max(filteredEvents.length * eventHeight + 60, 200)
-
+  const rowHeight = density === 'normal' ? 44 : 34
+  const diagramWidth = Math.max(
+    participantList.length * PARTICIPANT_WIDTH * zoomLevel,
+    780
+  )
+  const bodyHeight = Math.max(filteredEvents.length * rowHeight, 250)
+  const totalWidth = TIME_GUTTER_WIDTH + diagramWidth
   const xFor = (id: string) => {
     const index = participantList.findIndex(
       (item) => item.id === normalizeParticipant(id)
@@ -177,7 +115,6 @@ export function SequenceDiagram({
 
   return (
     <div className='space-y-3'>
-      {/* Barra de Herramientas y Controles de Vista */}
       <div className='flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card/60 p-2.5 text-xs'>
         <div className='flex flex-wrap items-center gap-2'>
           <div className='flex items-center rounded-md border bg-muted/30 p-0.5'>
@@ -190,392 +127,474 @@ export function SequenceDiagram({
                 setProcedureFilter('all')
               }}
             >
-              <Filter className='h-3 w-3 text-sky-500' />
-              Señalización 3GPP
+              <Filter className='h-3 w-3 text-sky-500' /> Señalización 3GPP
             </Button>
             <Button
               variant={filterMode === 'all' ? 'secondary' : 'ghost'}
               size='sm'
               className='h-7 gap-1 px-2.5 text-xs font-semibold'
-              onClick={() => {
-                setFilterMode('all')
-                setProcedureFilter('all')
-              }}
+              onClick={() => setFilterMode('all')}
             >
-              <Layers className='h-3 w-3 text-muted-foreground' />
-              Todos ({events.length})
+              <Layers className='h-3 w-3' /> Todos ({events.length})
             </Button>
           </div>
-
-          {/* Filtros rápidos por Fase 3GPP */}
-          <div className='hidden md:flex items-center gap-1 border-l pl-2'>
-            <Button
-              variant={procedureFilter === 'all' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setProcedureFilter('all')}
-            >
-              Todo
-            </Button>
-            <Button
-              variant={procedureFilter === 'registration' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setProcedureFilter('registration')}
-            >
-              Registro (Attach)
-            </Button>
-            <Button
-              variant={procedureFilter === 'authentication' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setProcedureFilter('authentication')}
-            >
-              5G-AKA
-            </Button>
-            <Button
-              variant={procedureFilter === 'pdu-session' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setProcedureFilter('pdu-session')}
-            >
-              Sesión PDU
-            </Button>
-            <Button
-              variant={procedureFilter === 'user-plane' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setProcedureFilter('user-plane')}
-            >
-              Ping (Datos)
-            </Button>
+          <div className='hidden items-center gap-1 border-l pl-2 xl:flex'>
+            {(
+              [
+                ['all', 'Todo'],
+                ['registration', 'Registro'],
+                ['authentication', '5G-AKA'],
+                ['pdu-session', 'Sesión PDU'],
+                ['user-plane', 'Datos'],
+              ] as const
+            ).map(([id, label]) => (
+              <Button
+                key={id}
+                variant={procedureFilter === id ? 'secondary' : 'ghost'}
+                size='sm'
+                className='h-7 px-2 text-[11px]'
+                onClick={() => setProcedureFilter(id)}
+              >
+                {label}
+              </Button>
+            ))}
           </div>
-
-          <div className='relative w-48 sm:w-60'>
-            <Search className='absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground' />
+          <div className='relative w-52 sm:w-64'>
+            <Search className='absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground' />
             <Input
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder='Buscar (ej: Registration, PDU, Ping)...'
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder='Mensaje, protocolo, interfaz…'
               className='h-7 pl-8 text-xs'
             />
           </div>
         </div>
-
-        <div className='flex items-center gap-2'>
-          <Badge variant='outline' className='font-mono text-[11px]'>
+        <div className='flex items-center gap-1.5'>
+          <Badge variant='outline' className='font-mono text-[10px]'>
             {filteredEvents.length} eventos
           </Badge>
+          <Button
+            variant='outline'
+            size='icon'
+            className='h-7 w-7'
+            title='Primer evento'
+            onClick={() =>
+              scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+            }
+          >
+            <ArrowUp className='h-3 w-3' />
+          </Button>
+          <Button
+            variant='outline'
+            size='icon'
+            className='h-7 w-7'
+            title='Último evento'
+            onClick={() =>
+              scrollRef.current?.scrollTo({
+                top: scrollRef.current.scrollHeight,
+                behavior: 'smooth',
+              })
+            }
+          >
+            <ArrowDown className='h-3 w-3' />
+          </Button>
+          <Button
+            variant='outline'
+            size='icon'
+            className='h-7 w-7'
+            disabled={zoomLevel <= 0.7}
+            title='Reducir zoom'
+            onClick={() => setZoomLevel((value) => Math.max(0.7, value - 0.15))}
+          >
+            <ZoomOut className='h-3 w-3' />
+          </Button>
+          <Button
+            variant='outline'
+            size='icon'
+            className='h-7 w-7'
+            disabled={zoomLevel >= 1.5}
+            title='Aumentar zoom'
+            onClick={() => setZoomLevel((value) => Math.min(1.5, value + 0.15))}
+          >
+            <ZoomIn className='h-3 w-3' />
+          </Button>
+          <Button
+            variant={density === 'compact' ? 'secondary' : 'outline'}
+            size='sm'
+            className='h-7 px-2 text-[11px]'
+            onClick={() =>
+              setDensity(density === 'normal' ? 'compact' : 'normal')
+            }
+          >
+            {density === 'normal' ? 'Compacto' : 'Normal'}
+          </Button>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='h-7 w-7'
+            title='Restablecer'
+            onClick={() => {
+              setZoomLevel(1)
+              setDensity('normal')
+              setSearchTerm('')
+              setProcedureFilter('all')
+            }}
+          >
+            <RotateCcw className='h-3 w-3' />
+          </Button>
+        </div>
+      </div>
 
-          <div className='flex items-center gap-1 border-l pl-2'>
-            <Button
-              variant={zoomLevel <= 0.85 ? 'secondary' : 'outline'}
-              size='sm'
-              className='h-7 px-2 text-[11px] font-semibold gap-1'
-              title='Ajustar para ver todas las NFs sin scroll'
-              onClick={() => {
-                setZoomLevel(0.8)
-                setDensity('compact')
-              }}
+      <div className='overflow-hidden rounded-xl border bg-card shadow-inner'>
+        <div
+          ref={scrollRef}
+          className='relative h-[620px] max-h-[calc(100vh-230px)] min-h-[420px] overflow-auto'
+          style={{ scrollbarWidth: 'thin' }}
+        >
+          <div
+            className='relative'
+            style={{ width: totalWidth, minHeight: HEADER_HEIGHT + bodyHeight }}
+          >
+            <div
+              className='sticky top-0 z-40 flex border-b bg-card/95 shadow-sm backdrop-blur'
+              style={{ width: totalWidth, height: HEADER_HEIGHT }}
             >
-              Ajustar
-            </Button>
-            <Button
-              variant='outline'
-              size='icon'
-              className='h-7 w-7'
-              title='Subir al primer evento'
-              onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            >
-              <ArrowUp className='h-3 w-3' />
-            </Button>
-            <Button
-              variant='outline'
-              size='icon'
-              className='h-7 w-7'
-              title='Bajar al último evento (tráfico y pings)'
-              onClick={() => scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' })}
-            >
-              <ArrowDown className='h-3 w-3' />
-            </Button>
-            <Button
-              variant='outline'
-              size='icon'
-              className='h-7 w-7'
-              title='Reducir zoom'
-              disabled={zoomLevel <= 0.8}
-              onClick={() => setZoomLevel((z) => Math.max(0.7, z - 0.15))}
-            >
-              <ZoomOut className='h-3 w-3' />
-            </Button>
-            <Button
-              variant='outline'
-              size='icon'
-              className='h-7 w-7'
-              title='Aumentar zoom'
-              disabled={zoomLevel >= 1.4}
-              onClick={() => setZoomLevel((z) => Math.min(1.5, z + 0.15))}
-            >
-              <ZoomIn className='h-3 w-3' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-7 w-7'
-              title='Restablecer vista'
-              onClick={() => {
-                setZoomLevel(1)
-                setDensity('normal')
-                setSearchTerm('')
-              }}
-            >
-              <RotateCcw className='h-3 w-3' />
-            </Button>
-            <Button
-              variant={density === 'compact' ? 'secondary' : 'outline'}
-              size='sm'
-              className='h-7 px-2 text-[11px]'
-              onClick={() => setDensity((d) => (d === 'normal' ? 'compact' : 'normal'))}
-            >
-              {density === 'normal' ? 'Compacto' : 'Normal'}
-            </Button>
+              <div
+                className='sticky left-0 z-50 flex shrink-0 items-center justify-between border-r bg-card px-3 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'
+                style={{ width: TIME_GUTTER_WIDTH }}
+              >
+                <span>Timestamp</span>
+                <span>Δ</span>
+              </div>
+              <div
+                className='relative shrink-0'
+                style={{ width: diagramWidth }}
+              >
+                {participantList.map((participant, index) => {
+                  const x = (index + 0.5) * PARTICIPANT_WIDTH * zoomLevel
+                  return (
+                    <div
+                      key={participant.id}
+                      className='absolute top-2 flex -translate-x-1/2 items-center gap-1.5 rounded-md border border-slate-500/50 bg-background px-3 py-1.5 shadow-sm'
+                      style={{ left: x, maxWidth: PARTICIPANT_WIDTH - 14 }}
+                      title={participant.label}
+                    >
+                      <span className='size-1.5 shrink-0 rounded-full bg-sky-500' />
+                      <span className='truncate font-mono text-xs font-bold tracking-wide'>
+                        {participant.label}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className='relative flex' style={{ height: bodyHeight }}>
+              {!filteredEvents.length && (
+                <div
+                  className='absolute top-20 z-20 flex justify-center px-6'
+                  style={{ left: TIME_GUTTER_WIDTH, width: diagramWidth }}
+                >
+                  <div className='max-w-md rounded-lg border border-amber-500/30 bg-card/95 px-4 py-3 text-center shadow-sm'>
+                    <p className='text-sm font-semibold'>
+                      No se observaron eventos de{' '}
+                      {procedureLabel(procedureFilter)}
+                    </p>
+                    <p className='mt-1 text-xs text-muted-foreground'>
+                      Esto no representa un resultado exitoso: el procedimiento
+                      no fue ejecutado o no estuvo visible en esta captura.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div
+                className='sticky left-0 z-30 shrink-0 border-r bg-card'
+                style={{ width: TIME_GUTTER_WIDTH, height: bodyHeight }}
+              >
+                {filteredEvents.map((event, index) => (
+                  <button
+                    key={`time-${event.id}`}
+                    type='button'
+                    onClick={() => onSelectEvent?.(event)}
+                    className={cn(
+                      'absolute left-0 grid w-full grid-cols-[1fr_auto] items-center gap-2 border-b border-dotted px-3 text-left font-mono transition-colors hover:bg-muted/70',
+                      selectedEventId === event.id &&
+                        'bg-primary/10 text-primary'
+                    )}
+                    style={{ top: index * rowHeight, height: rowHeight }}
+                  >
+                    <span className='truncate text-[10px]'>
+                      {absoluteTime(event.timestamp)}
+                    </span>
+                    <span className='text-[9px] text-muted-foreground'>
+                      {relativeTime(event)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <svg
+                role='img'
+                aria-label='Flujo de señalización extremo a extremo'
+                width={diagramWidth}
+                height={bodyHeight}
+                viewBox={`0 0 ${diagramWidth} ${bodyHeight}`}
+                className='block shrink-0'
+              >
+                {filteredEvents.map((event, index) => (
+                  <rect
+                    key={`row-${event.id}`}
+                    pointerEvents='none'
+                    x={0}
+                    y={index * rowHeight}
+                    width={diagramWidth}
+                    height={rowHeight}
+                    fill={
+                      selectedEventId === event.id
+                        ? 'color-mix(in oklab, var(--primary) 10%, transparent)'
+                        : index % 2
+                          ? 'color-mix(in oklab, var(--muted) 12%, transparent)'
+                          : 'transparent'
+                    }
+                    stroke='color-mix(in oklab, var(--border) 70%, transparent)'
+                    strokeDasharray='2 4'
+                    strokeWidth={0.7}
+                  />
+                ))}
+                {participantList.map((participant, index) => {
+                  const x = (index + 0.5) * PARTICIPANT_WIDTH * zoomLevel
+                  return (
+                    <line
+                      key={`lifeline-${participant.id}`}
+                      pointerEvents='none'
+                      x1={x}
+                      y1={0}
+                      x2={x}
+                      y2={bodyHeight}
+                      stroke='color-mix(in oklab, var(--muted-foreground) 42%, transparent)'
+                      strokeWidth={2}
+                    />
+                  )
+                })}
+                {filteredEvents.map((event, index) => {
+                  const sourceX = xFor(
+                    eventEndpointId(event.source, event.source_nf)
+                  )
+                  const targetX = xFor(
+                    eventEndpointId(event.target, event.target_nf)
+                  )
+                  const y = index * rowHeight + rowHeight / 2 + 5
+                  const selected = selectedEventId === event.id
+                  const inferred = event.evidence_type === 'correlated'
+                  const color = eventColor(event)
+                  const sameParticipant = Math.abs(sourceX - targetX) < 1
+                  const direction = targetX >= sourceX ? 1 : -1
+                  const endX = targetX - direction * 9
+                  const labelWidth = Math.min(
+                    Math.max(event.message.length * 6.2 + 18, 96),
+                    Math.max(Math.abs(targetX - sourceX) - 12, 116)
+                  )
+                  const labelX = sameParticipant
+                    ? sourceX + 42
+                    : (sourceX + targetX) / 2
+                  return (
+                    <g
+                      key={event.id}
+                      role='button'
+                      tabIndex={0}
+                      className='cursor-pointer outline-none'
+                      onClick={() => onSelectEvent?.(event)}
+                      onKeyDown={(keyEvent) => {
+                        if (keyEvent.key === 'Enter' || keyEvent.key === ' ')
+                          onSelectEvent?.(event)
+                      }}
+                    >
+                      {sameParticipant ? (
+                        <path
+                          d={`M ${sourceX} ${y} C ${sourceX + 55} ${y}, ${sourceX + 55} ${y + 20}, ${sourceX} ${y + 20}`}
+                          fill='none'
+                          stroke={color}
+                          strokeWidth={selected ? 3 : 2}
+                          strokeDasharray={inferred ? '6 4' : undefined}
+                        />
+                      ) : (
+                        <line
+                          x1={sourceX + direction * 7}
+                          y1={y}
+                          x2={endX}
+                          y2={y}
+                          stroke={color}
+                          strokeWidth={selected ? 3 : 2}
+                          strokeDasharray={inferred ? '6 4' : undefined}
+                        />
+                      )}
+                      <polygon
+                        points={arrowPoints(
+                          sameParticipant ? sourceX : targetX,
+                          sameParticipant ? y + 20 : y,
+                          sameParticipant ? -1 : direction
+                        )}
+                        fill={color}
+                      />
+                      <rect
+                        x={labelX - labelWidth / 2}
+                        y={index * rowHeight + 4}
+                        width={labelWidth}
+                        height={17}
+                        rx={3}
+                        fill={selected ? color : 'var(--card)'}
+                        stroke={color}
+                        strokeWidth={selected ? 1.5 : 0.8}
+                      />
+                      <text
+                        x={labelX}
+                        y={index * rowHeight + 16}
+                        textAnchor='middle'
+                        fill={selected ? '#ffffff' : color}
+                        className='font-mono text-[10px] font-semibold'
+                      >
+                        {truncate(
+                          event.message,
+                          Math.max(12, Math.floor(labelWidth / 6.4))
+                        )}
+                        <title>{event.message}</title>
+                      </text>
+                      <text
+                        x={Math.min(sourceX, targetX) + 5}
+                        y={index * rowHeight + rowHeight - 5}
+                        fill='var(--muted-foreground)'
+                        className='font-mono text-[8px]'
+                      >
+                        {(() => {
+                          const proto = event.protocol?.toUpperCase()
+                          const iface = event.interface_3gpp ?? event.interface
+                          const parts = [proto, iface].filter(Boolean) as string[]
+                          // Avoid duplicating when protocol already contains the interface name
+                          if (parts.length === 2 && proto && iface && proto.toLowerCase().includes(iface.toLowerCase()))
+                            return proto
+                          return parts.join(' · ')
+                        })()}
+                      </text>
+                    </g>
+                  )
+                })}
+              </svg>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Contenedor Principal con Scroll Vertical y Horizontal */}
-      <div className='relative flex flex-col rounded-xl border bg-card shadow-inner h-[620px] max-h-[calc(100vh-230px)] min-h-[420px] overflow-hidden'>
-        {/* Cabecera Fija de Funciones de Red (Sticky Header) */}
-        <div className='sticky top-0 z-30 flex shrink-0 border-b bg-card/95 backdrop-blur px-4 py-2.5 overflow-hidden shadow-sm'>
-          <div
-            className='flex items-center justify-between shrink-0 relative'
-            style={{ width: `${width}px`, height: '32px' }}
-          >
-            {participantList.map((participant, index) => {
-              const x = (index + 0.5) * PARTICIPANT_WIDTH * zoomLevel
-              return (
-                <div
-                  key={participant.id}
-                  className='flex flex-col items-center justify-center'
-                  style={{
-                    position: 'absolute',
-                    left: `${x}px`,
-                    transform: 'translateX(-50%)',
-                  }}
-                >
-                  <div className='flex items-center gap-1.5 rounded-lg border bg-background/90 px-3 py-1.5 shadow-sm'>
-                    <span className='font-mono text-xs font-black tracking-wide text-foreground'>
-                      {participant.label}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Cuerpo del Diagrama de Secuencia con Scroll Autónomo y Barras Visibles */}
-        <div
-          ref={scrollContainerRef}
-          className='relative flex-1 min-h-0 overflow-x-auto overflow-y-scroll p-4 select-none'
-          style={{
-            scrollbarWidth: 'thin',
-          }}
-        >
-          <svg
-            role='img'
-            aria-label='Diagrama de secuencia de la traza'
-            viewBox={`0 0 ${width} ${height}`}
-            width={width}
-            height={height}
-            className='block'
-          >
-            <defs>
-              <marker
-                id='trace-arrow'
-                markerWidth='8'
-                markerHeight='8'
-                refX='7'
-                refY='4'
-                orient='auto'
-              >
-                <path d='M0,0 L8,4 L0,8 Z' fill='var(--primary)' />
-              </marker>
-              <marker
-                id='trace-arrow-failure'
-                markerWidth='8'
-                markerHeight='8'
-                refX='7'
-                refY='4'
-                orient='auto'
-              >
-                <path d='M0,0 L8,4 L0,8 Z' fill='#ef4444' />
-              </marker>
-            </defs>
-
-            {/* Líneas de Vida de cada Función de Red */}
-            {participantList.map((participant, index) => {
-              const x = (index + 0.5) * PARTICIPANT_WIDTH * zoomLevel
-              return (
-                <line
-                  key={`lifeline-${participant.id}`}
-                  x1={x}
-                  y1={0}
-                  x2={x}
-                  y2={height}
-                  className='stroke-border/70'
-                  strokeDasharray='4 5'
-                  strokeWidth={1.5}
-                />
-              )
-            })}
-
-            {/* Mensajes y Flechas de la Secuencia */}
-            {filteredEvents.map((event, index) => {
-              const sourceId = eventEndpointId(event.source, event.source_nf)
-              const targetId = eventEndpointId(event.target, event.target_nf)
-              const sourceX = xFor(sourceId)
-              const targetX = xFor(targetId)
-              const y = index * eventHeight + 35
-              const inferred = event.evidence_type === 'correlated'
-              const failure = event.status === 'failure'
-              const selected = selectedEventId === event.id
-              const colorClass = failure
-                ? 'stroke-red-500'
-                : selected
-                  ? 'stroke-sky-500'
-                  : 'stroke-primary/70'
-              const textClass = failure
-                ? 'fill-red-500'
-                : selected
-                  ? 'fill-sky-500 font-bold'
-                  : 'fill-foreground'
-              const sameParticipant = Math.abs(sourceX - targetX) < 1
-
-              return (
-                <g
-                  key={event.id}
-                  role='button'
-                  tabIndex={0}
-                  className='cursor-pointer group outline-none'
-                  onClick={() => onSelectEvent?.(event)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') onSelectEvent?.(event)
-                  }}
-                >
-                  <rect
-                    x={8}
-                    y={y - eventHeight / 2 + 6}
-                    width={width - 16}
-                    height={eventHeight - 10}
-                    rx={6}
-                    className={cn(
-                      'transition-colors',
-                      selected
-                        ? 'fill-primary/10 stroke-primary/30'
-                        : 'fill-transparent group-hover:fill-muted/30'
-                    )}
-                  />
-
-                  {sameParticipant ? (
-                    <path
-                      d={`M ${sourceX} ${y} C ${sourceX + 45} ${y}, ${sourceX + 45} ${y + 20}, ${sourceX} ${y + 20}`}
-                      fill='none'
-                      className={colorClass}
-                      strokeWidth={selected ? 2.5 : 1.5}
-                      strokeDasharray={inferred ? '5 4' : undefined}
-                      markerEnd={`url(#${failure ? 'trace-arrow-failure' : 'trace-arrow'})`}
-                    />
-                  ) : (
-                    <line
-                      x1={sourceX}
-                      y1={y}
-                      x2={targetX + (targetX > sourceX ? -8 : 8)}
-                      y2={y}
-                      className={colorClass}
-                      strokeWidth={selected ? 2.5 : 1.5}
-                      strokeDasharray={inferred ? '5 4' : undefined}
-                      markerEnd={`url(#${failure ? 'trace-arrow-failure' : 'trace-arrow'})`}
-                    />
-                  )}
-
-                  <text
-                    x={(sourceX + targetX) / 2}
-                    y={y - 6}
-                    textAnchor='middle'
-                    className={cn('font-mono text-[11px]', textClass)}
-                  >
-                    {truncate(event.message, Math.floor(42 * zoomLevel))}
-                    <title>{event.message}</title>
-                  </text>
-
-                  <text
-                    x={(sourceX + targetX) / 2}
-                    y={sameParticipant ? y + 32 : y + 14}
-                    textAnchor='middle'
-                    className='fill-muted-foreground font-mono text-[9px] opacity-80'
-                  >
-                    {[
-                      event.interface_3gpp ?? event.interface,
-                      event.protocol?.toUpperCase(),
-                      relativeTime(event),
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </text>
-                </g>
-              )
-            })}
-          </svg>
-        </div>
-
-        {/* Barra Flotante de Navegación Rápida con Flechas Arriba y Abajo */}
-        {filteredEvents.length > 6 && (
-          <div className='absolute bottom-4 right-5 z-40 flex items-center gap-1 rounded-full border bg-card/95 px-2.5 py-1 shadow-xl backdrop-blur-md'>
-            <span className='text-[11px] font-medium text-muted-foreground mr-1'>
-              {filteredEvents.length} eventos
-            </span>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-7 w-7 rounded-full hover:bg-sky-500/10 hover:text-sky-500'
-              title='Subir al inicio (Primer evento)'
-              onClick={() => scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
-            >
-              <ArrowUp className='h-3.5 w-3.5' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-7 w-7 rounded-full hover:bg-sky-500/10 hover:text-sky-500'
-              title='Subir un bloque (-400px)'
-              onClick={() => scrollContainerRef.current?.scrollBy({ top: -400, behavior: 'smooth' })}
-            >
-              <ChevronUp className='h-3.5 w-3.5' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-7 w-7 rounded-full hover:bg-sky-500/10 hover:text-sky-500'
-              title='Bajar un bloque (+400px)'
-              onClick={() => scrollContainerRef.current?.scrollBy({ top: 400, behavior: 'smooth' })}
-            >
-              <ChevronDown className='h-3.5 w-3.5 text-sky-500' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-7 w-7 rounded-full hover:bg-sky-500/10 hover:text-sky-500'
-              title='Bajar al final (Pings y Datos)'
-              onClick={() => scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' })}
-            >
-              <ArrowDown className='h-3.5 w-3.5' />
-            </Button>
-          </div>
-        )}
+      <div className='flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border bg-muted/15 px-3 py-2 text-[10px] text-muted-foreground'>
+        <span className='font-semibold tracking-wide uppercase'>
+          Protocolos
+        </span>
+        {['NAS', 'NGAP', 'HTTP2', 'PFCP', 'GTP-U', 'ICMP', 'NR-Uu'].map((protocol) => (
+          <span key={protocol} className='flex items-center gap-1.5'>
+            <span
+              className='h-0.5 w-5 rounded-full'
+              style={{ backgroundColor: protocolColor(protocol) }}
+            />
+            {protocol}
+          </span>
+        ))}
+        <span className='ml-auto'>
+          Línea discontinua = evento correlacionado
+        </span>
       </div>
     </div>
   )
+}
+
+function isNoise(event: TraceEvent) {
+  const message = (event.message || '').toLowerCase()
+  const protocol = (event.protocol || '').toLowerCase()
+  if (
+    [
+      'heartbeat',
+      'nnrf_nfmanagement',
+      '204 no content',
+      'window_update',
+      'settings',
+      'magic',
+      'data[',
+      'headers[',
+    ].some((term) => message.includes(term))
+  )
+    return true
+  const semantic = [
+    'ngap',
+    'nas',
+    'pfcp',
+    'gtp',
+    'icmp',
+    'http',
+    'sbi',
+    'registration',
+    'authentication',
+    'security',
+    'session',
+    'release',
+    'pdu',
+  ].some((term) => protocol.includes(term) || message.includes(term))
+  return !semantic && protocol === 'tcp'
+}
+
+function matchesProcedure(event: TraceEvent, procedure: string) {
+  const message = event.message.toLowerCase()
+  if (event.procedure === procedure) return true
+  if (procedure === 'registration')
+    return message.includes('registration') || message.includes('attach')
+  if (procedure === 'authentication')
+    return message.includes('authenticat') || message.includes('security')
+  if (procedure === 'pdu-session')
+    return (
+      message.includes('pdu') ||
+      message.includes('pfcp') ||
+      message.includes('session')
+    )
+  if (procedure === 'user-plane')
+    return (
+      message.includes('ping') ||
+      message.includes('icmp') ||
+      message.includes('gtp-u')
+    )
+  return true
+}
+
+function procedureLabel(value: string) {
+  return (
+    {
+      all: 'la selección actual',
+      registration: 'Registro',
+      authentication: '5G-AKA',
+      'pdu-session': 'Sesión PDU',
+      'user-plane': 'Datos',
+    }[value] ?? value
+  )
+}
+
+function eventColor(event: TraceEvent) {
+  return event.status === 'failure'
+    ? '#ef4444'
+    : protocolColor(event.protocol ?? event.interface_3gpp ?? '')
+}
+function protocolColor(value: string) {
+  const protocol = value.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (protocol.includes('nas')) return '#0ea5e9'
+  if (protocol.includes('ngap') || protocol.includes('s1ap')) return '#14b8a6'
+  if (protocol.includes('http') || protocol.includes('sbi')) return '#8b5cf6'
+  if (protocol.includes('pfcp') || protocol.includes('n4')) return '#f59e0b'
+  if (protocol.includes('gtpu') || protocol.includes('n3')) return '#22c55e'
+  if (protocol.includes('gtpc')) return '#eab308'
+  if (protocol.includes('icmp')) return '#06b6d4'
+  if (protocol.includes('sctp')) return '#64748b'
+  if (protocol.includes('nruu') || protocol.includes('radio')) return '#ec4899'
+  return '#7c3aed'
+}
+function arrowPoints(x: number, y: number, direction: number) {
+  return direction > 0
+    ? `${x},${y} ${x - 10},${y - 5} ${x - 10},${y + 5}`
+    : `${x},${y} ${x + 10},${y - 5} ${x + 10},${y + 5}`
 }
 
 function buildParticipants(
@@ -584,14 +603,13 @@ function buildParticipants(
 ) {
   const labels = new Map<string, string>()
   for (const item of declared ?? []) {
-    if (typeof item === 'string') {
+    if (typeof item === 'string')
       labels.set(normalizeParticipant(item), displayParticipant(item))
-      continue
-    }
-    labels.set(
-      normalizeParticipant(item.id ?? item.label),
-      item.label ?? displayParticipant(item.id)
-    )
+    else
+      labels.set(
+        normalizeParticipant(item.id ?? item.label ?? 'NF'),
+        item.label ?? displayParticipant(item.id)
+      )
   }
   for (const event of events) {
     const source = eventEndpointId(event.source, event.source_nf)
@@ -614,7 +632,6 @@ function buildParticipants(
         a.id.localeCompare(b.id)
     )
 }
-
 function normalizeParticipant(value: string) {
   return value
     .toLowerCase()
@@ -622,39 +639,41 @@ function normalizeParticipant(value: string) {
     .replace(/enodeb/g, 'enb')
     .replace(/[^a-z0-9-]/g, '')
 }
-
 function endpointLabel(endpoint: TraceEvent['source'], fallback?: string) {
-  if (typeof endpoint === 'object')
-    return (
-      endpoint.label ??
-      displayParticipant(endpoint.nf ?? endpoint.id ?? fallback ?? 'NF')
-    )
-  return displayParticipant(endpoint ?? fallback ?? 'NF')
+  return typeof endpoint === 'object'
+    ? (endpoint.label ??
+        displayParticipant(endpoint.nf ?? endpoint.id ?? fallback ?? 'NF'))
+    : displayParticipant(endpoint ?? fallback ?? 'NF')
 }
-
 function displayParticipant(value: string) {
   const normalized = normalizeParticipant(value)
-  const labels: Record<string, string> = {
-    ue: 'UE',
-    gnb: 'gNodeB',
-    enb: 'eNodeB',
-    dn: 'Data Network',
-  }
-  return labels[normalized] ?? value.toUpperCase()
+  return (
+    (
+      { ue: 'UE', gnb: 'gNodeB', enb: 'eNodeB', dn: 'Data Network' } as Record<
+        string,
+        string
+      >
+    )[normalized] ?? value.toUpperCase()
+  )
 }
-
 function participantRank(id: string) {
   const index = CANONICAL_ORDER.indexOf(id)
   return index === -1 ? CANONICAL_ORDER.length : index
 }
-
 function truncate(value: string, max: number) {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`
+  return value.length <= max
+    ? value
+    : `${value.slice(0, Math.max(max - 1, 1))}…`
 }
-
 function relativeTime(event: TraceEvent) {
   if (event.relative_ms == null) return `#${event.ordinal ?? '—'}`
   return event.relative_ms < 1000
-    ? `+${event.relative_ms.toFixed(0)} ms`
-    : `+${(event.relative_ms / 1000).toFixed(3)} s`
+    ? `+${event.relative_ms.toFixed(0)}ms`
+    : `+${(event.relative_ms / 1000).toFixed(3)}s`
+}
+function absoluteTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const base = date.toLocaleTimeString([], { hour12: false })
+  return `${base}.${String(date.getMilliseconds()).padStart(3, '0')}`
 }

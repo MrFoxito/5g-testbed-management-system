@@ -163,31 +163,12 @@ export function Dashboard() {
               Supervisión en tiempo real de funciones de red, sesiones de usuario y recursos del testbed.
             </p>
           </div>
-          <div className='flex flex-wrap items-center gap-2'>
-            <Button
-              variant='default'
-              size='sm'
-              onClick={handlePing}
-              disabled={isPinging}
-              className='gap-2'
-            >
-              <Flame className='h-4 w-4 text-amber-300' />
-              {isPinging ? 'Transmitiendo ping...' : 'Generar Tráfico 5G (Ping)'}
-            </Button>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => exportEvidence('json')}
-              className='gap-2'
-              title='Exportar paquete de evidencia del laboratorio en JSON'
-            >
-              <ArrowDownToLine className='h-4 w-4' />
-              Exportar Evidencia (.json)
-            </Button>
+          <div className='flex items-center gap-2'>
             <Badge
               variant={status.data?.state === 'running' ? 'default' : 'destructive'}
+              className='px-3 py-1 text-xs font-medium tracking-wide uppercase'
             >
-              {status.data?.state ?? 'conectando'}
+              ● {status.data?.state ?? 'conectando'}
             </Badge>
           </div>
         </div>

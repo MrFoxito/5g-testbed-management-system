@@ -127,10 +127,11 @@ function TelcoNode({ data }: NodeProps) {
       style={{ minWidth: 140, minHeight: 74 }}
     >
       {/* Handles para conexiones limpias */}
-      <Handle type='target' position={Position.Top} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
-      <Handle type='source' position={Position.Bottom} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
-      <Handle type='target' position={Position.Left} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
-      <Handle type='source' position={Position.Right} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap((position) =>
+        (['source', 'target'] as const).map((type) => (
+          <Handle key={`${type}-${position}`} id={`${type}-${position}`} type={type} position={position} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+        ))
+      )}
 
       {/* Status LED */}
       <span
@@ -222,11 +223,24 @@ function telcoElements(components: ComponentStatus[]) {
       stroke: 'dashed',
     }
 
+    const sourcePosition = nodes.find((node) => node.id === link.from)!.position
+    const targetPosition = nodes.find((node) => node.id === link.to)!.position
+    const horizontal = Math.abs(targetPosition.y - sourcePosition.y) < 1
+    const sourceSide = horizontal
+      ? targetPosition.x >= sourcePosition.x ? Position.Right : Position.Left
+      : targetPosition.y >= sourcePosition.y ? Position.Bottom : Position.Top
+    const targetSide = horizontal
+      ? targetPosition.x >= sourcePosition.x ? Position.Left : Position.Right
+      : targetPosition.y >= sourcePosition.y ? Position.Top : Position.Bottom
+
     edges.push({
       id: key,
       source: link.from,
       target: link.to,
-      animated: true,
+      sourceHandle: `source-${sourceSide}`,
+      targetHandle: `target-${targetSide}`,
+      type: 'straight',
+      animated: false,
       label: info.label,
       labelStyle: {
         fontSize: 10,
@@ -244,7 +258,6 @@ function telcoElements(components: ComponentStatus[]) {
       style: {
         stroke: 'var(--muted-foreground)',
         strokeWidth: 2,
-        strokeDasharray: info.stroke === 'dashed' ? '5,5' : undefined,
       },
     })
   }

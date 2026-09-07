@@ -1,5 +1,74 @@
-from app.services.trace_analysis import TSHARK_FIELDS, build_trace_analysis, subscriber_hash
+from app.services.trace_analysis import (
+    TSHARK_FIELDS,
+    _deduplicate_loopback_sbi,
+    _parse_sbi_call,
+    build_trace_analysis,
+    subscriber_hash,
+)
 from app.services.telco_kpis import parse_telco_logs
+
+
+def test_sbi_mapping_never_identifies_loopback_client_as_gnodeb():
+    event = _parse_sbi_call(
+        {
+            "http2.headers.path": "/nnrf-nfm/v1/nf-instances/example",
+            "http2.headers.method": "PATCH",
+        },
+        "127.0.0.1",
+        "127.0.0.10",
+    )
+
+    assert event is not None
+    assert event[0] == "5GC NF"
+    assert event[1] == "NRF"
+
+
+def test_nsmf_pdu_session_is_presented_as_n11_between_amf_and_smf():
+    event = _parse_sbi_call(
+        {
+            "http2.headers.path": "/nsmf-pdusession/v1/sm-contexts",
+            "http2.headers.method": "POST",
+        },
+        "127.0.0.5",
+        "127.0.0.4",
+    )
+
+    assert event == (
+        "AMF",
+        "SMF",
+        "Nsmf_PDUSession Create Context",
+        "N11 / SBI",
+        "pdu-session",
+    )
+
+
+def test_loopback_sbi_duplicates_are_collapsed_without_losing_identifiers():
+    base = {
+        "source_nf": "AMF",
+        "target_nf": "SMF",
+        "protocol": "HTTP/2",
+        "message": "Nsmf_PDUSession Create Context",
+        "procedure": "pdu-session",
+        "identifiers": [{"kind": "supi", "value": "999700000000001"}],
+    }
+    events = [
+        {**base, "id": "first", "_epoch": 10.0},
+        {
+            **base,
+            "id": "duplicate",
+            "_epoch": 10.001,
+            "identifiers": [{"kind": "pdu_session_id", "value": "1"}],
+        },
+        {**base, "id": "later", "_epoch": 11.0},
+    ]
+
+    result = _deduplicate_loopback_sbi(events)
+
+    assert [item["id"] for item in result] == ["first", "later"]
+    assert {item["kind"] for item in result[0]["identifiers"]} == {
+        "supi",
+        "pdu_session_id",
+    }
 
 
 def parameters(five_g=False):
@@ -205,6 +274,52 @@ def test_subscriber_analysis_excludes_identifiers_from_previous_context():
     assert analysis["events"][0]["relative_ms"] == 0
     assert all("_epoch" not in event and "_target_match" not in event for event in analysis["events"])
     assert analysis["relations"]
+
+
+def test_successful_procedure_is_independent_from_full_identifier_chain():
+    def row(values):
+        return "\t".join(f'"{values.get(field, "")}"' for field in TSHARK_FIELDS)
+
+    identifier = "999700000000001"
+    capture = "\n".join(
+        [
+            row(
+                {
+                    "frame.number": "1",
+                    "frame.time_epoch": "1.0",
+                    "_ws.col.Protocol": "NGAP/NAS-5GS",
+                    "_ws.col.Info": "InitialUEMessage, Registration request",
+                    "ip.src": "127.0.0.1",
+                    "ip.dst": "127.0.0.5",
+                    "nas_5gs.mm.suci.msin": "0000000001",
+                }
+            ),
+            row(
+                {
+                    "frame.number": "2",
+                    "frame.time_epoch": "1.1",
+                    "_ws.col.Protocol": "NGAP/NAS-5GS",
+                    "_ws.col.Info": "DownlinkNASTransport, Registration accept",
+                    "ip.src": "127.0.0.5",
+                    "ip.dst": "127.0.0.1",
+                }
+            ),
+        ]
+    )
+    analysis = build_trace_analysis(
+        {
+            "id": "procedure-result-test",
+            "selector_kind": "imsi",
+            "selector_hash": subscriber_hash(identifier),
+            "selector_masked": "99970•••001",
+            "scenario_defaults": {"mcc": "999", "mnc": "70"},
+            "procedures": ["registration"],
+        },
+        capture,
+    )
+
+    assert analysis["outcome"] == "success"
+    assert analysis["correlation_status"] == "partial"
 
 
 def test_student_can_create_and_delete_own_interface_trace(client, student_headers):

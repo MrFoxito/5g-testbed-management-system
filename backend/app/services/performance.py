@@ -11,6 +11,7 @@ from app.models import Role, UserPublic
 from app.services.observability import collect_alarms, metrics_service
 from app.services.scenarios import CATALOG, scenario_manager
 from app.services.telco_kpis import collect_telco_kpis
+from app.services.nf_metrics import definitions as nf_definitions, nf_metrics
 
 
 COUNTERS: list[dict[str, Any]] = [
@@ -62,6 +63,18 @@ COUNTERS: list[dict[str, Any]] = [
 ]
 
 COUNTER_BY_ID = {item["id"]: item for item in COUNTERS}
+for item in COUNTERS:
+    if "procedure" in item["objects"]:
+        prefix = item["id"]
+        procedure = ("registration" if prefix.startswith("5g.registration") or prefix == "5g.ue.registered"
+                     else "pdu-session" if prefix.startswith("5g.pdu")
+                     else "attach" if prefix.startswith("4g.attach") or prefix == "4g.ue.attached"
+                     else "eps-bearer")
+        item["object_ids"] = [f"procedure:{procedure}"]
+
+
+def compatible(counter, object_id):
+    return object_id in counter["object_ids"] if counter.get("object_ids") else object_id.split(":", 1)[0] in counter["objects"]
 RANGE_SECONDS = {"15m": 900, "1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}
 AGGREGATIONS = {"avg", "min", "max", "sum", "last"}
 
@@ -109,10 +122,13 @@ class PerformanceRepository:
         sql = f"""SELECT bucket_epoch,object_id,counter_id,value,unit,source,quality
         FROM metric_samples WHERE testbed_id=? AND scenario_id=?
         AND object_id IN ({object_marks}) AND counter_id IN ({counter_marks})
-        AND bucket_epoch BETWEEN ? AND ? ORDER BY bucket_epoch ASC LIMIT 50000"""
+        AND bucket_epoch BETWEEN ? AND ? ORDER BY bucket_epoch ASC LIMIT 200001"""
         params = [testbed_id, scenario_id, *object_ids, *counter_ids, start, end]
         with transaction() as conn:
-            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+            rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+        if len(rows) > 200000:
+            raise ValueError("La consulta supera 200 000 muestras. Reduzca el rango, los objetos o los contadores.")
+        return rows
 
     def folders(self, user: UserPublic) -> list[dict[str, Any]]:
         with transaction() as conn:
@@ -148,7 +164,7 @@ class PerformanceRepository:
         with transaction() as conn:
             if payload.get("folder_id"):
                 folder = conn.execute("SELECT owner,testbed_id,scope FROM kpi_folders WHERE id=?", (payload["folder_id"],)).fetchone()
-                if not folder or (folder["owner"] != user.username and folder["scope"] != "testbed"):
+                if not folder or folder["testbed_id"] != (user.testbed or "local") or (folder["owner"] != user.username and folder["scope"] != "testbed"):
                     raise PermissionError("Carpeta no accesible")
             conn.execute("""INSERT INTO kpi_queries(id,name,folder_id,owner,testbed_id,scenario_id,scope,
             object_ids,counter_ids,range_key,granularity_seconds,aggregation,created_at,updated_at)
@@ -188,6 +204,7 @@ class MetricsCollector:
     def __init__(self) -> None:
         self.task: asyncio.Task | None = None
         self.stop_event = asyncio.Event()
+        self.collect_lock = asyncio.Lock()
 
     async def start(self) -> None:
         if self.task and not self.task.done():
@@ -215,6 +232,10 @@ class MetricsCollector:
                 await asyncio.sleep(1)
 
     async def collect_once(self) -> int:
+        async with self.collect_lock:
+            return await self._collect_once()
+
+    async def _collect_once(self) -> int:
         total = 0
         testbed_id = "local"
         for scenario_id in CATALOG:
@@ -232,8 +253,14 @@ class MetricsCollector:
                     collect_telco_kpis(testbed_id, scenario_id),
                 )
                 samples = self._samples(testbed_id, scenario_id, status, metrics, alarms, telco)
+                probe_error = None
+                try:
+                    probe = await nf_metrics.probe(scenario_manager.adapter, CATALOG[scenario_id]["components"])
+                    samples.extend(nf_metrics.ingest(probe, testbed_id, scenario_id, _now()))
+                except Exception as exc:
+                    probe_error = "Sondeo NF no disponible: " + type(exc).__name__
                 count = performance_repository.insert_samples(samples)
-                performance_repository.finish_run(run_id, "success", count)
+                performance_repository.finish_run(run_id, "partial" if probe_error else "success", count, probe_error)
                 total += count
             except Exception as exc:
                 performance_repository.finish_run(run_id, "failed", 0, str(exc)[:500])
@@ -324,20 +351,29 @@ class PerformanceService:
                 {"id": "procedure:eps-bearer", "label": "EPS Bearer", "type": "procedure", "group": "Procedimientos 4G"},
             ])
         counters = [item for item in COUNTERS if scenario_id in item.get("scenarios", [scenario_id])]
+        counters = counters + nf_definitions(testbed_id, scenario_id)
+        for obj in objects:
+            if obj["type"] == "nf":
+                obj["capabilities"] = nf_metrics.health.get((testbed_id, scenario_id, obj["id"][3:]), {"metrics_status": "pending"})
+                obj["counter_count"] = sum(compatible(c, obj["id"]) for c in counters)
         return {"scenario_id": scenario_id, "testbed_id": testbed_id, "objects": objects, "counters": counters, "collector": {**performance_repository.status(), "interval_seconds": max(get_settings().metrics_collection_interval_seconds, 5), "retention_days": get_settings().metrics_retention_days}}
 
     def query(self, payload: dict[str, Any], user: UserPublic) -> dict[str, Any]:
         testbed_id = user.testbed or "local"
         object_ids = list(dict.fromkeys(payload["object_ids"]))
         counter_ids = list(dict.fromkeys(payload["counter_ids"]))
-        unknown = [item for item in counter_ids if item not in COUNTER_BY_ID]
+        scenario_id = payload["scenario_id"]
+        if scenario_id not in CATALOG:
+            raise ValueError("Escenario no válido")
+        counter_by_id = {item["id"]: item for item in [*COUNTERS, *nf_definitions(testbed_id, scenario_id)] if scenario_id in item.get("scenarios", [scenario_id])}
+        unknown = [item for item in counter_ids if item not in counter_by_id]
         if unknown:
             raise ValueError("Contadores desconocidos: " + ", ".join(unknown))
         unusable = [
             counter_id
             for counter_id in counter_ids
             if not any(
-                object_id.split(":", 1)[0] in COUNTER_BY_ID[counter_id]["objects"]
+                compatible(counter_by_id[counter_id], object_id)
                 for object_id in object_ids
             )
         ]
@@ -348,18 +384,24 @@ class PerformanceService:
             )
         end = int((payload.get("end") or _now()).timestamp())
         start = int((payload.get("start") or datetime.fromtimestamp(end - RANGE_SECONDS[payload["range_key"]], tz=timezone.utc)).timestamp())
+        if start >= end or end - start > 7 * 86400:
+            raise ValueError("Seleccione un rango válido de hasta 7 días")
         granularity = payload["granularity_seconds"]
         rows = performance_repository.raw_samples(testbed_id=testbed_id, scenario_id=payload["scenario_id"], object_ids=object_ids, counter_ids=counter_ids, start=start, end=end)
         grouped: dict[tuple[str, str, int], list[float]] = defaultdict(list)
         metadata: dict[tuple[str, str], tuple[str, str, str]] = {}
         for row in rows:
+            if not compatible(counter_by_id[row["counter_id"]], row["object_id"]):
+                continue
             if row["counter_id"].endswith(".latency_ms") and not 0 <= row["value"] <= 60_000:
                 continue
             bucket = row["bucket_epoch"] // granularity * granularity
             grouped[(row["object_id"], row["counter_id"], bucket)].append(row["value"])
             metadata[(row["object_id"], row["counter_id"])] = (row["unit"], row["source"], row["quality"])
         aggregation = payload["aggregation"]
-        def aggregate(values: list[float]) -> float:
+        def aggregate(values: list[float], counter_id: str) -> float:
+            # Summing/averaging snapshots of a cumulative counter invents events.
+            if counter_by_id[counter_id]["kind"] == "counter": return values[-1]
             if aggregation == "last": return values[-1]
             if aggregation == "min": return min(values)
             if aggregation == "max": return max(values)
@@ -368,12 +410,13 @@ class PerformanceService:
         series = []
         for object_id in object_ids:
             for counter_id in counter_ids:
-                points = [{"timestamp": datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(), "epoch": bucket, "value": round(aggregate(values), 4)} for (obj, counter, bucket), values in grouped.items() if obj == object_id and counter == counter_id]
+                points = [{"timestamp": datetime.fromtimestamp(bucket, tz=timezone.utc).isoformat(), "epoch": bucket, "value": round(aggregate(values, counter_id), 4)} for (obj, counter, bucket), values in grouped.items() if obj == object_id and counter == counter_id]
                 if not points:
                     continue
                 unit, source, quality = metadata[(object_id, counter_id)]
-                series.append({"id": f"{object_id}|{counter_id}", "object_id": object_id, "counter_id": counter_id, "label": f"{object_id.split(':', 1)[-1]} · {COUNTER_BY_ID[counter_id]['label']}", "unit": unit, "source": source, "quality": quality, "points": sorted(points, key=lambda p: p["epoch"])})
-        return {"testbed_id": testbed_id, "scenario_id": payload["scenario_id"], "start": datetime.fromtimestamp(start, tz=timezone.utc).isoformat(), "end": datetime.fromtimestamp(end, tz=timezone.utc).isoformat(), "granularity_seconds": granularity, "aggregation": aggregation, "sample_count": len(rows), "series": series}
+                series.append({"id": f"{object_id}|{counter_id}", "object_id": object_id, "counter_id": counter_id, "label": f"{object_id.split(':', 1)[-1]} · {counter_by_id[counter_id]['label']}", "unit": unit, "source": source, "quality": quality, "kind": counter_by_id[counter_id]["kind"], "aggregation": "last" if counter_by_id[counter_id]["kind"] == "counter" else aggregation, "points": sorted(points, key=lambda p: p["epoch"])})
+        missing = [{"object_id": obj, "counter_id": counter} for obj in object_ids for counter in counter_ids if compatible(counter_by_id[counter], obj) and (obj, counter) not in metadata]
+        return {"testbed_id": testbed_id, "scenario_id": payload["scenario_id"], "start": datetime.fromtimestamp(start, tz=timezone.utc).isoformat(), "end": datetime.fromtimestamp(end, tz=timezone.utc).isoformat(), "granularity_seconds": granularity, "aggregation": aggregation, "sample_count": len(rows), "series": series, "missing_series": missing, "notes": ["Los contadores acumulados conservan la última muestra por intervalo; no se suman sus instantáneas.", "Las métricas nativas de una NF compartida entre 4G y 5G miden el proceso completo."]}
 
 
 performance_service = PerformanceService()

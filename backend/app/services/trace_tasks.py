@@ -1,11 +1,12 @@
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import struct
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -347,8 +348,11 @@ class TraceTaskService:
         result = await self._start_task(task)
         if request.auto_trigger and result["status"] == "running":
             try:
-                await self._trigger_registration(request.include_user_plane)
-                trace_repository.update(task["id"], message="Registration/PDU Session disparados de forma controlada")
+                trigger = await self._trigger_registration(request.include_user_plane)
+                trace_repository.update(
+                    task["id"],
+                    message=f"Registration disparado y UE verificado: {trigger}",
+                )
                 result = self._public(trace_repository.get(task["id"]))
             except Exception as exc:
                 trace_repository.update(task["id"], message=f"Captura activa; no se pudo disparar el UE: {exc}")
@@ -518,16 +522,32 @@ class TraceTaskService:
             trace_repository.update(task["id"], status="failed", result="capture_error", message=str(exc), completed_at=self._now())
             raise
 
-    async def _trigger_registration(self, include_user_plane: bool) -> None:
+    async def _trigger_registration(self, include_user_plane: bool) -> str:
+        # Give the remote tshark process enough time to attach to `any` before
+        # tearing down the old UE association.
+        await asyncio.sleep(0.75)
         await scenario_manager.stop_component("5g-sa", "ue")
         await asyncio.sleep(0.5)
         await scenario_manager.start_component("5g-sa", "ue")
-        await asyncio.sleep(3)
+        status = ""
+        for _ in range(12):
+            await asyncio.sleep(1)
+            result = await scenario_manager.adapter.native_operation(
+                "ueransim-cli", "ue", {"command": "status"}
+            )
+            status = result.get("output", "")
+            if "RM-REGISTERED" in status and "CM-CONNECTED" in status:
+                break
+        else:
+            raise TraceTaskError(
+                "UERANSIM no alcanzó RM-REGISTERED/CM-CONNECTED después del reinicio"
+            )
         if include_user_plane:
             try:
                 await scenario_manager.adapter.generate_test_traffic(3)
             except Exception:
                 pass
+        return "RM-REGISTERED / CM-CONNECTED"
 
     @staticmethod
     def _write_empty_pcap(path: Path) -> None:
@@ -571,7 +591,7 @@ class TraceTaskService:
                 else:
                     summary = self._summarize_local(path)
                     tshark_output, tshark_version = self._analyze_local(path)
-                logs = await self._log_markers()
+                logs = await self._log_markers(task.get("started_at"))
                 analysis_task = {
                     **task,
                     "scenario_defaults": CATALOG[task["scenario_id"]]["defaults"],
@@ -643,9 +663,20 @@ class TraceTaskService:
             analysis_file=analysis_file,
         )
 
-    async def _log_markers(self) -> dict[str, bool]:
+    async def _log_markers(self, started_at: str | None = None) -> dict[str, bool]:
         try:
             lines = await scenario_manager.adapter.logs("ueransim-ue", 300)
+            if started_at:
+                cutoff = datetime.fromisoformat(started_at.replace("Z", "+00:00")) - timedelta(seconds=1)
+                recent = []
+                for line in lines:
+                    match = re.search(r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?)\]", line)
+                    if not match:
+                        continue
+                    timestamp = datetime.fromisoformat(match.group(1)).replace(tzinfo=timezone.utc)
+                    if timestamp >= cutoff:
+                        recent.append(line)
+                lines = recent
             text = "\n".join(lines)
             return {
                 "registration": "Initial Registration is successful" in text,

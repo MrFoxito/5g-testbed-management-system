@@ -154,6 +154,14 @@ def initialize() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_kpi_queries_owner
               ON kpi_queries(owner, testbed_id, scope);
+            CREATE TABLE IF NOT EXISTS nf_metric_definitions (
+              testbed_id TEXT NOT NULL,
+              scenario_id TEXT NOT NULL,
+              counter_id TEXT NOT NULL,
+              definition TEXT NOT NULL,
+              last_seen TEXT NOT NULL,
+              PRIMARY KEY(testbed_id,scenario_id,counter_id)
+            );
             CREATE TABLE IF NOT EXISTS collector_runs (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               started_at TEXT NOT NULL,

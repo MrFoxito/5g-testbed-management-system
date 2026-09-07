@@ -9,11 +9,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import {
-  isActiveTrace,
-  type TraceEvidenceType,
-  type TraceTask,
-} from '../types'
+import { isActiveTrace, type TraceEvidenceType, type TraceTask } from '../types'
+
 const STATUS_LABELS: Record<string, string> = {
   queued: 'En cola',
   preparing: 'Preparando',
@@ -22,7 +19,7 @@ const STATUS_LABELS: Record<string, string> = {
   running: 'Capturando',
   stopping: 'Deteniendo',
   processing: 'Correlacionando',
-  completed: 'Completada',
+  completed: 'Captura finalizada',
   partial: 'Parcial',
   failed: 'Fallida',
   stopped: 'Detenida',
@@ -52,6 +49,11 @@ export function TraceStatusBadge({ status }: { status: string }) {
 
   return (
     <Badge
+      title={
+        status === 'completed'
+          ? 'La tarea de captura terminó correctamente; el resultado del procedimiento se evalúa por separado.'
+          : undefined
+      }
       variant={failed ? 'destructive' : active ? 'default' : 'secondary'}
       className={cn(
         'gap-1 whitespace-nowrap',
@@ -69,8 +71,8 @@ export function TraceStatusBadge({ status }: { status: string }) {
 const OUTCOME_LABELS: Record<string, string> = {
   success: 'Procedimiento exitoso',
   procedure_failure: 'Falla de procedimiento',
-  partial: 'Correlación parcial',
-  inconclusive: 'No concluyente',
+  partial: 'Evidencia parcial',
+  inconclusive: 'Procedimiento no verificado',
   no_traffic: 'Sin tráfico observado',
   unknown: 'Pendiente de análisis',
 }
@@ -81,6 +83,7 @@ export function TraceOutcomeBadge({ outcome }: { outcome?: string }) {
   const success = outcome === 'success'
   return (
     <Badge
+      title='Resultado determinado a partir de los mensajes y procedimientos observados en la captura.'
       variant={failed ? 'destructive' : 'outline'}
       className={cn(
         success &&

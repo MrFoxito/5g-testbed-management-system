@@ -4,6 +4,12 @@ export type KpiObject = {
   type: 'testbed' | 'nf' | 'interface' | 'procedure'
   group: string
   status?: string
+  counter_count?: number
+  capabilities?: {
+    metrics_status: string
+    process_status?: string
+    checked_at?: string
+  }
 }
 
 export type KpiCounter = {
@@ -14,6 +20,11 @@ export type KpiCounter = {
   kind: 'gauge' | 'counter'
   source: string
   objects: KpiObject['type'][]
+  object_ids?: string[]
+  description?: string
+  native_name?: string
+  dimensions?: Record<string, string>
+  last_seen?: string
 }
 
 export type PerformanceCatalog = {
@@ -72,6 +83,8 @@ export type KpiSeries = {
   unit: string
   source: string
   quality: string
+  kind?: 'gauge' | 'counter'
+  aggregation?: Aggregation
   points: { timestamp: string; epoch: number; value: number }[]
 }
 
@@ -84,4 +97,30 @@ export type KpiQueryResult = {
   granularity_seconds: number
   aggregation: Aggregation
   series: KpiSeries[]
+  missing_series?: { object_id: string; counter_id: string }[]
+  notes?: string[]
+}
+
+export function supportsObject(counter: KpiCounter, objectId: string) {
+  return counter.object_ids?.length
+    ? counter.object_ids.includes(objectId)
+    : counter.objects.includes(objectId.split(':')[0] as KpiObject['type'])
+}
+
+export function recommendedCounters(counters: KpiCounter[], objectId: string) {
+  const compatible = counters.filter((counter) =>
+    supportsObject(counter, objectId)
+  )
+  const native = compatible.filter(
+    (c) =>
+      c.source === 'Open5GS /metrics' &&
+      c.kind === 'gauge' &&
+      /session|ues_active|registeredsubnbr|^gnb$|^enb$/.test(
+        c.native_name ?? ''
+      )
+  )
+  if (native.length) return native.slice(0, 3).map((c) => c.id)
+  const memory = compatible.find((c) => c.id.endsWith('.rss_mib'))
+  if (memory) return [memory.id]
+  return compatible.slice(0, 2).map((c) => c.id)
 }

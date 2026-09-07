@@ -22,6 +22,7 @@ import { Route as AuthenticatedTopologyIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedSubscribersIndexRouteImport } from './routes/_authenticated/subscribers/index'
 import { Route as AuthenticatedPerformanceIndexRouteImport } from './routes/_authenticated/performance/index'
 import { Route as AuthenticatedConfigurationIndexRouteImport } from './routes/_authenticated/configuration/index'
+import { Route as AuthenticatedCommandsIndexRouteImport } from './routes/_authenticated/commands/index'
 import { Route as AuthenticatedAuditIndexRouteImport } from './routes/_authenticated/audit/index'
 import { Route as AuthenticatedAlarmsIndexRouteImport } from './routes/_authenticated/alarms/index'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
@@ -95,6 +96,12 @@ const AuthenticatedConfigurationIndexRoute =
     path: '/configuration/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedCommandsIndexRoute =
+  AuthenticatedCommandsIndexRouteImport.update({
+    id: '/commands/',
+    path: '/commands/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedAuditIndexRoute = AuthenticatedAuditIndexRouteImport.update({
   id: '/audit/',
   path: '/audit/',
@@ -124,6 +131,7 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/alarms/': typeof AuthenticatedAlarmsIndexRoute
   '/audit/': typeof AuthenticatedAuditIndexRoute
+  '/commands/': typeof AuthenticatedCommandsIndexRoute
   '/configuration/': typeof AuthenticatedConfigurationIndexRoute
   '/performance/': typeof AuthenticatedPerformanceIndexRoute
   '/subscribers/': typeof AuthenticatedSubscribersIndexRoute
@@ -141,6 +149,7 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/alarms': typeof AuthenticatedAlarmsIndexRoute
   '/audit': typeof AuthenticatedAuditIndexRoute
+  '/commands': typeof AuthenticatedCommandsIndexRoute
   '/configuration': typeof AuthenticatedConfigurationIndexRoute
   '/performance': typeof AuthenticatedPerformanceIndexRoute
   '/subscribers': typeof AuthenticatedSubscribersIndexRoute
@@ -160,6 +169,7 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/alarms/': typeof AuthenticatedAlarmsIndexRoute
   '/_authenticated/audit/': typeof AuthenticatedAuditIndexRoute
+  '/_authenticated/commands/': typeof AuthenticatedCommandsIndexRoute
   '/_authenticated/configuration/': typeof AuthenticatedConfigurationIndexRoute
   '/_authenticated/performance/': typeof AuthenticatedPerformanceIndexRoute
   '/_authenticated/subscribers/': typeof AuthenticatedSubscribersIndexRoute
@@ -179,6 +189,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/alarms/'
     | '/audit/'
+    | '/commands/'
     | '/configuration/'
     | '/performance/'
     | '/subscribers/'
@@ -196,6 +207,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/alarms'
     | '/audit'
+    | '/commands'
     | '/configuration'
     | '/performance'
     | '/subscribers'
@@ -214,6 +226,7 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/alarms/'
     | '/_authenticated/audit/'
+    | '/_authenticated/commands/'
     | '/_authenticated/configuration/'
     | '/_authenticated/performance/'
     | '/_authenticated/subscribers/'
@@ -324,6 +337,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedConfigurationIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/commands/': {
+      id: '/_authenticated/commands/'
+      path: '/commands'
+      fullPath: '/commands/'
+      preLoaderRoute: typeof AuthenticatedCommandsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/audit/': {
       id: '/_authenticated/audit/'
       path: '/audit'
@@ -353,6 +373,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedAlarmsIndexRoute: typeof AuthenticatedAlarmsIndexRoute
   AuthenticatedAuditIndexRoute: typeof AuthenticatedAuditIndexRoute
+  AuthenticatedCommandsIndexRoute: typeof AuthenticatedCommandsIndexRoute
   AuthenticatedConfigurationIndexRoute: typeof AuthenticatedConfigurationIndexRoute
   AuthenticatedPerformanceIndexRoute: typeof AuthenticatedPerformanceIndexRoute
   AuthenticatedSubscribersIndexRoute: typeof AuthenticatedSubscribersIndexRoute
@@ -365,6 +386,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedAlarmsIndexRoute: AuthenticatedAlarmsIndexRoute,
   AuthenticatedAuditIndexRoute: AuthenticatedAuditIndexRoute,
+  AuthenticatedCommandsIndexRoute: AuthenticatedCommandsIndexRoute,
   AuthenticatedConfigurationIndexRoute: AuthenticatedConfigurationIndexRoute,
   AuthenticatedPerformanceIndexRoute: AuthenticatedPerformanceIndexRoute,
   AuthenticatedSubscribersIndexRoute: AuthenticatedSubscribersIndexRoute,

@@ -31,6 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { supportsObject } from './types'
 import type {
   Aggregation,
   KpiCounter,
@@ -70,13 +71,8 @@ export function QueryWizard({
   const [draft, setDraft] = useState(initial)
   const [search, setSearch] = useState('')
 
-  const selectedTypes = new Set(
-    objects
-      .filter((item) => draft.object_ids.includes(item.id))
-      .map((item) => item.type)
-  )
   const compatibleCounters = counters.filter((counter) =>
-    counter.objects.some((type) => selectedTypes.has(type))
+    draft.object_ids.some((id) => supportsObject(counter, id))
   )
   const visibleObjects = objects.filter((item) =>
     `${item.label} ${item.group}`.toLowerCase().includes(search.toLowerCase())
@@ -258,6 +254,10 @@ export function QueryWizard({
                         >
                           <Checkbox
                             checked={draft.counter_ids.includes(item.id)}
+                            disabled={
+                              !draft.counter_ids.includes(item.id) &&
+                              draft.counter_ids.length >= 12
+                            }
                             onCheckedChange={() =>
                               setDraft({
                                 ...draft,

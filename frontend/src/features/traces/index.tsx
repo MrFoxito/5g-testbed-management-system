@@ -3,7 +3,6 @@ import axios from 'axios'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
-  ArrowLeft,
   ListChecks,
   Radio,
   RefreshCw,
@@ -199,16 +198,6 @@ export function TracesPage() {
       <EmsPage
         title={resolvedTask.name ?? 'Detalle de Traza'}
         description='Estudio de trazabilidad extremo a extremo para el suscriptor y funciones de red.'
-        actions={
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => setSelectedTaskId(null)}
-            className='gap-2 font-semibold shadow-xs hover:bg-muted'
-          >
-            <ArrowLeft className='h-4 w-4' /> Volver a Trazas
-          </Button>
-        }
       >
         <TraceTaskDetailView
           task={resolvedTask}
@@ -222,7 +211,9 @@ export function TracesPage() {
           role={user?.role}
           currentUsername={user?.username}
           isStopping={stop.isPending && stop.variables?.id === selectedTaskId}
-          isDeleting={remove.isPending && remove.variables?.id === selectedTaskId}
+          isDeleting={
+            remove.isPending && remove.variables?.id === selectedTaskId
+          }
           onBack={() => setSelectedTaskId(null)}
           onStop={(task) => stop.mutate(task)}
           onDelete={(task) => {
@@ -352,8 +343,6 @@ export function TracesPage() {
           />
         </TabsContent>
       </Tabs>
-
-
     </EmsPage>
   )
 }

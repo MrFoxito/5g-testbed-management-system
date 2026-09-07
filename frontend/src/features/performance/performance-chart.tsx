@@ -49,8 +49,34 @@ export function PerformanceChart({ result }: { result?: KpiQueryResult }) {
       </div>
     )
   }
-  if (result.series.some((series) => series.counter_id.endsWith('.attempts'))) {
+  if (
+    result.series.every((series) =>
+      series.object_id.startsWith('procedure:')
+    ) &&
+    new Set(result.series.map((s) => s.object_id)).size === 1 &&
+    result.series.some((series) => series.counter_id.endsWith('.attempts'))
+  ) {
     return <ProcedureChart result={result} />
+  }
+  const units = [...new Set(result.series.map((s) => s.unit))]
+  if (units.length > 1) {
+    return (
+      <div className='space-y-4'>
+        {units.map((unit) => (
+          <section key={unit}>
+            <h3 className='mb-1 text-xs font-medium text-muted-foreground'>
+              Unidad: {unit}
+            </h3>
+            <PerformanceChart
+              result={{
+                ...result,
+                series: result.series.filter((s) => s.unit === unit),
+              }}
+            />
+          </section>
+        ))}
+      </div>
+    )
   }
   const timestamps = uniqueTimestamps(result.series)
   const rows = timestamps.map((timestamp) => {
@@ -90,7 +116,7 @@ export function PerformanceChart({ result }: { result?: KpiQueryResult }) {
               stroke={COLORS[index % COLORS.length]}
               strokeWidth={2}
               dot={rows.length < 20}
-              connectNulls
+              connectNulls={false}
             />
           ))}
         </LineChart>
