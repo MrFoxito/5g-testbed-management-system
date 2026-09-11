@@ -8,6 +8,7 @@ from app.core.config import get_settings
 from app.db import initialize
 from app.services.trace_tasks import trace_task_service
 from app.services.performance import metrics_collector
+from app.services.alarm_center import alarm_observer
 
 
 @asynccontextmanager
@@ -15,7 +16,9 @@ async def lifespan(_: FastAPI):
     initialize()
     await trace_task_service.initialize()
     await metrics_collector.start()
+    await alarm_observer.start()
     yield
+    await alarm_observer.stop()
     await metrics_collector.stop()
     await trace_task_service.shutdown()
 

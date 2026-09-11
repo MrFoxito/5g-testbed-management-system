@@ -102,6 +102,20 @@ class SubscriberCreate(BaseModel):
         return value.upper() if value else value
 
 
+class SubscriberUpdate(BaseModel):
+    key: str | None = Field(default=None, min_length=32, max_length=32, pattern=r"^[0-9A-Fa-f]+$")
+    opc: str | None = Field(default=None, min_length=32, max_length=32, pattern=r"^[0-9A-Fa-f]+$")
+    amf: str | None = Field(default=None, pattern=r"^[0-9A-Fa-f]{4}$")
+    apn_dnn: str | None = Field(default=None, min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9.-]+$")
+    sst: int | None = Field(default=None, ge=0, le=255)
+    sd: str | None = Field(default=None, pattern=r"^[0-9A-Fa-f]{6}$")
+
+    @field_validator("key", "opc", "amf", "sd")
+    @classmethod
+    def uppercase_hex(cls, value):
+        return value.upper() if value else value
+
+
 class TraceLimits(BaseModel):
     name: str = Field(default="Nueva tarea de traza", min_length=3, max_length=80)
     scenario_id: str = "5g-sa"

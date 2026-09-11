@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -11,6 +11,8 @@ import {
   History,
   Network,
   Play,
+  List,
+  SlidersHorizontal,
   Radio,
   Search,
   Server,
@@ -26,6 +28,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -53,26 +62,42 @@ import type {
 } from './types'
 
 type ScenarioId = '5g-sa' | '4g-epc'
-type ResultTab = 'result' | 'history' | 'reference'
+type ResultTab = 'result' | 'history'
 
 export function CommandsPage() {
   const queryClient = useQueryClient()
+  const searchParams = new URLSearchParams(
+    typeof window !== 'undefined' ? window.location.search : ''
+  )
+  const initialNode =
+    searchParams.get('component') || searchParams.get('node') || ''
+
   const [scenario, setScenario] = useState<ScenarioId>('5g-sa')
-  const [selectedComponentId, setSelectedComponentId] = useState('')
+  const [selectedComponentId, setSelectedComponentId] = useState(initialNode)
   const [selectedOperationId, setSelectedOperationId] = useState('')
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({})
   const [nodeSearch, setNodeSearch] = useState('')
   const [operationSearch, setOperationSearch] = useState('')
-  const [expertMode, setExpertMode] = useState(false)
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
+  const [parametersOpen, setParametersOpen] = useState(false)
+  const [confirmation, setConfirmation] =
+    useState<OperationExecutePayload | null>(null)
+  const executionLock = useRef(false)
+  const inputRef = useRef<HTMLInputElement>(null)
   const [commandInput, setCommandInput] = useState('')
   const [lastResult, setLastResult] = useState<OperationResult | null>(null)
   const [lastMmlCommand, setLastMmlCommand] = useState('')
   const [resultTab, setResultTab] = useState<ResultTab>('result')
+  const [showSuggestions, setShowSuggestions] = useState(false)
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(0)
+  const suggestionsContainerRef = useRef<HTMLDivElement>(null)
 
   const catalogQuery = useQuery({
     queryKey: ['operations-catalog', scenario],
     queryFn: async () =>
-      (await api.get<OperationsCatalog>(`/operations/catalog/${scenario}`)).data,
+      (await api.get<OperationsCatalog>(`/operations/catalog/${scenario}`))
+        .data,
     refetchInterval: 15_000,
   })
 
@@ -93,9 +118,7 @@ export function CommandsPage() {
   )
   const currentComponent = useMemo(
     () =>
-      components.find(
-        (component) => component.id === selectedComponentId
-      ) ??
+      components.find((component) => component.id === selectedComponentId) ??
       components.find((component) => component.id === 'gnb') ??
       components.find((component) => component.id === 'amf') ??
       components[0],
@@ -105,29 +128,9 @@ export function CommandsPage() {
     () =>
       currentComponent?.operations.find(
         (operation) => operation.id === selectedOperationId
-      ) ?? currentComponent?.operations[0],
+      ),
     [currentComponent, selectedOperationId]
   )
-  const effectiveParamValues = useMemo(
-    () =>
-      currentOperation
-        ? { ...parameterDefaults(currentOperation), ...paramValues }
-        : {},
-    [currentOperation, paramValues]
-  )
-
-  const generatedCommand = useMemo(() => {
-    if (!currentOperation || !currentComponent) return ''
-    return stripEnvelope(
-      toMmlSyntax(
-        currentOperation,
-        currentComponent.id,
-        currentComponent.label,
-        effectiveParamValues
-      )
-    )
-  }, [currentComponent, currentOperation, effectiveParamValues])
-
   const executeMutation = useMutation({
     mutationFn: async (payload: OperationExecutePayload) =>
       (await api.post<OperationResult>('/operations/execute', payload)).data,
@@ -152,9 +155,17 @@ export function CommandsPage() {
       void queryClient.invalidateQueries({
         queryKey: ['operations-history', scenario],
       })
-      toast.success('Operación completada', {
-        description: `${result.component_label} · ${result.operation_label} · ${result.duration_ms} ms`,
-      })
+      toast[result.status === 'success' ? 'success' : 'error'](
+        result.status === 'success'
+          ? 'Operación completada'
+          : 'Operación fallida',
+        {
+          description: `${result.component_label} · ${result.operation_label} · ${result.duration_ms} ms`,
+        }
+      )
+    },
+    onSettled: () => {
+      executionLock.current = false
     },
     onError: (error) =>
       toast.error('No se pudo ejecutar la operación', {
@@ -162,52 +173,162 @@ export function CommandsPage() {
       }),
   })
 
+  const submit = (payload: OperationExecutePayload) => {
+    if (executionLock.current) return
+    executionLock.current = true
+    setConfirmation(null)
+    executeMutation.mutate(payload)
+  }
+
   const handleExecute = () => {
-    if (expertMode) {
-      const parsed = parseMmlCommand(commandInput, catalogQuery.data)
-      if (!parsed.success) {
-        toast.error('Comando no válido', { description: parsed.error })
-        return
-      }
-      setSelectedComponentId(parsed.componentId)
-      setSelectedOperationId(parsed.operationId)
-      setParamValues(parsed.parameters)
-      executeMutation.mutate({
-        scenario_id: scenario,
-        component_id: parsed.componentId,
-        operation_id: parsed.operationId,
-        parameters: parsed.parameters,
-      })
+    if (
+      executionLock.current ||
+      confirmation ||
+      manualOpen ||
+      catalogOpen ||
+      !currentComponent ||
+      catalogQuery.isError
+    )
+      return
+    let input = stripEnvelope(commandInput.trim()).replace(/;$/, '').trim()
+    if (!input) return
+    // An omitted NF means the selected destination; an explicit different NF is rejected.
+    if (!/(?:^|[:,])\s*NF\s*=/i.test(input)) {
+      input += input.includes(':') ? (input.endsWith(':') ? ' ' : ', ') : ': '
+      input += 'NF="' + currentComponent.id + '"'
+    }
+    const parsed = parseMmlCommand(input + ';', catalogQuery.data)
+    if (!parsed.success) {
+      toast.error('Comando no válido', { description: parsed.error })
       return
     }
-
-    if (!currentComponent || !currentOperation) return
-    if (!currentOperation.allowed) {
+    if (parsed.componentId !== currentComponent.id) {
+      toast.error('El destino del comando no coincide con el nodo seleccionado')
+      return
+    }
+    const operation = currentComponent.operations.find(
+      (item) => item.id === parsed.operationId
+    )
+    if (!operation?.allowed) {
       toast.error('Operación no autorizada para su rol')
       return
     }
-    executeMutation.mutate({
+    setSelectedOperationId(operation.id)
+    setParamValues(parsed.parameters)
+    const payload: OperationExecutePayload = {
       scenario_id: scenario,
       component_id: currentComponent.id,
-      operation_id: currentOperation.id,
-      parameters: effectiveParamValues,
-    })
+      operation_id: operation.id,
+      parameters: parsed.parameters,
+    }
+    if (operation.mutating) setConfirmation(payload)
+    else submit(payload)
   }
 
-  useEffect(() => {
-    const handleShortcut = (event: KeyboardEvent) => {
-      if (
-        (event.ctrlKey || event.metaKey) &&
-        event.key === 'Enter' &&
-        !executeMutation.isPending
-      ) {
-        event.preventDefault()
-        handleExecute()
+  const chooseOperation = (
+    operation: OperationDefinition,
+    targetComponent?: ComponentOperations
+  ) => {
+    const comp = targetComponent ?? currentComponent
+    if (!comp) return
+    if (comp.id !== currentComponent?.id) {
+      setSelectedComponentId(comp.id)
+    }
+    const defaults = parameterDefaults(operation)
+    setSelectedOperationId(operation.id)
+    setParamValues(defaults)
+    setCommandInput(
+      stripEnvelope(
+        toMmlSyntax(
+          operation,
+          comp.id,
+          comp.label,
+          defaults
+        )
+      )
+    )
+    setParametersOpen(operation.parameters.length > 0)
+    setCatalogOpen(false)
+    setShowSuggestions(false)
+    requestAnimationFrame(() => inputRef.current?.focus())
+  }
+
+  const allMmlSuggestions = useMemo(() => {
+    const list: {
+      code: string
+      syntax: string
+      operation: OperationDefinition
+      component: ComponentOperations
+      isCurrentNode: boolean
+    }[] = []
+
+    for (const comp of components) {
+      for (const op of comp.operations) {
+        const code = operationCode(op, comp)
+        const defaults = parameterDefaults(op)
+        const syntax = stripEnvelope(
+          toMmlSyntax(op, comp.id, comp.label, defaults)
+        )
+        list.push({
+          code,
+          syntax,
+          operation: op,
+          component: comp,
+          isCurrentNode: comp.id === currentComponent?.id,
+        })
       }
     }
-    window.addEventListener('keydown', handleShortcut)
-    return () => window.removeEventListener('keydown', handleShortcut)
-  })
+    return list
+  }, [components, currentComponent])
+
+  const suggestions = useMemo(() => {
+    const raw = commandInput.trim()
+    if (!raw) return []
+    const cleanQuery = raw
+      .replace(/^%%/, '')
+      .replace(/;$/, '')
+      .trim()
+      .toUpperCase()
+    if (!cleanQuery) return []
+
+    const tokens = cleanQuery.split(/\s+/).filter(Boolean)
+
+    const matches = allMmlSuggestions.filter((item) => {
+      const targetText = `${item.code} ${item.syntax} ${item.operation.label} ${item.component.id} ${item.component.label} ${item.operation.id}`.toUpperCase()
+      return tokens.every((token) => targetText.includes(token))
+    })
+
+    return matches
+      .sort((a, b) => {
+        if (a.isCurrentNode && !b.isCurrentNode) return -1
+        if (!a.isCurrentNode && b.isCurrentNode) return 1
+
+        const aStarts = a.code.toUpperCase().startsWith(cleanQuery)
+        const bStarts = b.code.toUpperCase().startsWith(cleanQuery)
+        if (aStarts && !bStarts) return -1
+        if (!aStarts && bStarts) return 1
+
+        return a.code.localeCompare(b.code)
+      })
+      .slice(0, 8)
+  }, [commandInput, allMmlSuggestions])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        suggestionsContainerRef.current &&
+        !suggestionsContainerRef.current.contains(event.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
 
   const visibleComponents = useMemo(() => {
     const query = nodeSearch.trim().toLowerCase()
@@ -238,17 +359,12 @@ export function CommandsPage() {
     () => groupOperations(visibleOperations),
     [visibleOperations]
   )
-  const totalOperations = components.reduce(
-    (total, component) => total + component.operations.length,
-    0
-  )
-
   const copyResult = () => {
     if (!lastResult) return
-    void navigator.clipboard.writeText(
-      formatTelcoReport(lastResult, lastMmlCommand)
-    )
-    toast.success('Resultado copiado')
+    void navigator.clipboard
+      .writeText(formatTelcoReport(lastResult, lastMmlCommand))
+      .then(() => toast.success('Resultado copiado'))
+      .catch(() => toast.error('No se pudo copiar el resultado'))
   }
 
   const downloadResult = () => {
@@ -288,26 +404,28 @@ export function CommandsPage() {
 
   return (
     <EmsPage
-      title='Centro de Comandos'
-      description='Operaciones controladas sobre funciones de red, RAN y equipos de usuario.'
+      title='Comandos'
+      description=''
       actions={
-        <div className='flex items-center gap-2'>
-          <Badge variant='outline' className='h-9 gap-2 px-3 font-mono text-xs'>
-            <span className='size-1.5 rounded-full bg-emerald-500' />
-            {catalogQuery.data?.execution_mode?.toUpperCase() ?? 'CARGANDO'}
+        <div className='flex flex-wrap items-center gap-2'>
+          <Badge variant='outline' className='font-mono text-xs'>
+            {catalogQuery.data?.execution_mode?.toUpperCase() ?? '—'}
           </Badge>
           <Select
             value={scenario}
+            disabled={executeMutation.isPending}
             onValueChange={(value) => {
               setScenario(value as ScenarioId)
               setSelectedComponentId('')
               setSelectedOperationId('')
               setParamValues({})
+              setCommandInput('')
               setLastResult(null)
-              setExpertMode(false)
+              setParametersOpen(false)
+              setResultTab('result')
             }}
           >
-            <SelectTrigger className='w-44'>
+            <SelectTrigger className='w-40' aria-label='Escenario'>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -315,399 +433,510 @@ export function CommandsPage() {
               <SelectItem value='4g-epc'>4G EPC</SelectItem>
             </SelectContent>
           </Select>
+          <Button variant='outline' onClick={() => setManualOpen(true)}>
+            <BookOpen className='size-4' />
+            Manual
+          </Button>
         </div>
       }
     >
       {catalogQuery.error && (
-        <Alert variant='destructive'>
-          <AlertTitle>No se pudo cargar el catálogo operativo</AlertTitle>
+        <Alert variant='destructive' className='mb-3'>
+          <AlertTitle>Catálogo no disponible</AlertTitle>
           <AlertDescription>
             {apiErrorMessage(
               catalogQuery.error,
-              'Verifique el backend y el testbed.'
+              'Verifique la conexión con el backend.'
             )}
           </AlertDescription>
         </Alert>
       )}
-
-      <Card className='min-h-[720px] overflow-hidden p-0'>
-        <div className='grid min-h-[720px] grid-cols-1 xl:grid-cols-[260px_310px_minmax(0,1fr)]'>
-          <section className='flex min-h-0 flex-col border-b bg-muted/10 xl:border-r xl:border-b-0'>
-            <PanelHeader
-              step='01'
-              title='Elemento de red'
-              detail={`${components.length} nodos disponibles`}
-            />
-            <div className='border-b p-3'>
+      <Card className='overflow-hidden p-0 mb-6'>
+        <div className='grid h-[calc(100dvh-215px)] min-h-[520px] grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[230px_minmax(0,1fr)]'>
+          <aside className='flex min-h-0 flex-col border-b md:border-r md:border-b-0'>
+            <div className='flex items-center justify-between border-b px-3 py-2 text-xs font-semibold'>
+              Elementos de red{' '}
+              <span className='font-mono text-muted-foreground'>
+                {components.length}
+              </span>
+            </div>
+            <div className='p-2'>
               <SearchInput
                 value={nodeSearch}
                 onChange={setNodeSearch}
-                placeholder='Buscar nodo o servicio'
+                placeholder='Buscar NF…'
                 label='Buscar elementos de red'
               />
             </div>
-            <ScrollArea className='h-[260px] flex-1 xl:h-auto'>
-              <div className='space-y-1 p-2'>
-                {catalogQuery.isLoading && !components.length ? (
-                  <LoadingRows count={8} />
-                ) : (
-                  visibleComponents.map((component) => (
-                    <NodeButton
-                      key={component.id}
-                      component={component}
-                      selected={component.id === currentComponent?.id}
-                      onSelect={() => {
-                        setSelectedComponentId(component.id)
-                        setSelectedOperationId('')
-                        setParamValues({})
-                        setOperationSearch('')
-                        setExpertMode(false)
-                      }}
-                    />
-                  ))
-                )}
-                {!catalogQuery.isLoading && !visibleComponents.length && (
-                  <EmptyList text='No hay nodos que coincidan con la búsqueda.' />
-                )}
-              </div>
-            </ScrollArea>
-          </section>
-
-          <section className='flex min-h-0 flex-col border-b xl:border-r xl:border-b-0'>
-            <PanelHeader
-              step='02'
-              title='Operación'
-              detail={
-                currentComponent
-                  ? `${currentComponent.operations.length} comandos para ${currentComponent.label}`
-                  : `${totalOperations} comandos disponibles`
-              }
-            />
-            <div className='border-b p-3'>
-              <SearchInput
-                value={operationSearch}
-                onChange={setOperationSearch}
-                placeholder='Buscar operación o código'
-                label='Buscar operaciones'
-              />
+            <div className='max-h-40 flex-1 overflow-y-auto px-2 pb-2 md:max-h-none'>
+              {catalogQuery.isLoading ? (
+                <LoadingRows count={6} />
+              ) : (
+                visibleComponents.map((component) => (
+                  <NodeButton
+                    key={component.id}
+                    component={component}
+                    selected={component.id === currentComponent?.id}
+                    onSelect={() => {
+                      if (executeMutation.isPending) return
+                      setSelectedComponentId(component.id)
+                      setSelectedOperationId('')
+                      setParamValues({})
+                      setCommandInput('')
+                      setParametersOpen(false)
+                      setOperationSearch('')
+                      inputRef.current?.focus()
+                    }}
+                  />
+                ))
+              )}
+              {!catalogQuery.isLoading && !visibleComponents.length && (
+                <EmptyList text='Sin coincidencias' />
+              )}
             </div>
-            <ScrollArea className='h-[300px] flex-1 xl:h-auto'>
-              <div className='space-y-4 p-2'>
-                {groupedOperations.map(([category, operations]) => (
-                  <div key={category}>
-                    <p className='px-2 pb-1.5 text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase'>
-                      {category}
-                    </p>
-                    <div className='space-y-1'>
-                      {operations.map((operation) => (
-                        <OperationButton
-                          key={operation.id}
-                          operation={operation}
-                          code={operationCode(operation, currentComponent)}
-                          selected={operation.id === currentOperation?.id}
-                          onSelect={() => {
-                            setSelectedOperationId(operation.id)
-                            setParamValues(parameterDefaults(operation))
-                            setExpertMode(false)
+          </aside>
+          <section className='flex min-h-0 min-w-0 flex-col'>
+            <div className='shrink-0 space-y-2 border-b bg-muted/10 p-3'>
+              <div className='flex items-center justify-between gap-2'>
+                <div className='flex min-w-0 items-center gap-2 text-xs'>
+                  <span className='font-semibold'>
+                    {currentComponent?.label ?? 'Sin destino'}
+                  </span>
+                  <span className='truncate font-mono text-muted-foreground'>
+                    {currentComponent?.unit}
+                  </span>
+                </div>
+                <div className='flex items-center gap-1'>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    disabled={!currentComponent || executeMutation.isPending}
+                    onClick={() => {
+                      setOperationSearch('')
+                      setCatalogOpen(true)
+                    }}
+                  >
+                    <List className='size-3.5' />
+                    Catálogo
+                  </Button>
+                  <Button
+                    variant={parametersOpen ? 'secondary' : 'ghost'}
+                    size='sm'
+                    disabled={
+                      !currentOperation?.parameters.length ||
+                      !commandInput ||
+                      executeMutation.isPending
+                    }
+                    onClick={() => setParametersOpen((value) => !value)}
+                  >
+                    <SlidersHorizontal className='size-3.5' />
+                    Parámetros
+                  </Button>
+                </div>
+              </div>
+              <div className='relative'>
+                {showSuggestions && suggestions.length > 0 && (
+                  <div
+                    ref={suggestionsContainerRef}
+                    className='absolute top-full left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-lg border border-border/80 bg-popover/95 backdrop-blur-sm text-popover-foreground shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100'
+                  >
+                    <div className='flex items-center justify-between border-b border-border/60 bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground'>
+                      <div className='flex items-center gap-1.5 font-medium'>
+                        <Terminal className='size-3 text-primary' />
+                        <span>Sugerencias MML ({suggestions.length})</span>
+                      </div>
+                      <span className='font-mono text-[9px] text-muted-foreground/80'>
+                        ↑ ↓ navegar · Tab o ↵ autocompletar · Esc cerrar
+                      </span>
+                    </div>
+                    <div className='max-h-56 overflow-y-auto p-1 divide-y divide-border/20'>
+                      {suggestions.map((item, idx) => (
+                        <button
+                          key={`${item.component.id}-${item.operation.id}-${idx}`}
+                          type='button'
+                          className={cn(
+                            'flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors font-mono',
+                            idx === activeSuggestionIndex
+                              ? 'bg-primary text-primary-foreground font-semibold'
+                              : 'hover:bg-muted/70 text-foreground'
+                          )}
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            chooseOperation(item.operation, item.component)
                           }}
-                        />
+                          onMouseEnter={() => setActiveSuggestionIndex(idx)}
+                        >
+                          <div className='flex items-center gap-2 min-w-0 flex-1 text-xs'>
+                            <Badge
+                              variant={
+                                idx === activeSuggestionIndex
+                                  ? 'outline'
+                                  : 'secondary'
+                              }
+                              className={cn(
+                                'h-4 px-1 text-[9px] font-sans uppercase shrink-0 font-semibold',
+                                idx === activeSuggestionIndex &&
+                                  'border-primary-foreground/40 text-primary-foreground'
+                              )}
+                            >
+                              {item.component.id}
+                            </Badge>
+                            <span className='truncate font-mono'>
+                              {item.syntax}
+                            </span>
+                          </div>
+                          <div className='flex items-center gap-1.5 shrink-0'>
+                            {item.operation.mutating ? (
+                              <Wrench
+                                className={cn(
+                                  'size-3',
+                                  idx === activeSuggestionIndex
+                                    ? 'text-primary-foreground'
+                                    : 'text-amber-500'
+                                )}
+                              />
+                            ) : (
+                              <Activity
+                                className={cn(
+                                  'size-3',
+                                  idx === activeSuggestionIndex
+                                    ? 'text-primary-foreground'
+                                    : 'text-sky-500'
+                                )}
+                              />
+                            )}
+                            <span
+                              className={cn(
+                                'truncate max-w-[150px] text-[11px] font-sans',
+                                idx === activeSuggestionIndex
+                                  ? 'text-primary-foreground/90'
+                                  : 'text-muted-foreground'
+                              )}
+                            >
+                              {item.operation.label}
+                            </span>
+                          </div>
+                        </button>
                       ))}
                     </div>
                   </div>
-                ))}
-                {currentComponent && !visibleOperations.length && (
-                  <EmptyList text='No hay operaciones que coincidan con la búsqueda.' />
                 )}
-                {!currentComponent && (
-                  <EmptyList text='Seleccione primero un elemento de red.' />
-                )}
-              </div>
-            </ScrollArea>
-          </section>
 
-          <section className='flex min-w-0 flex-col bg-background'>
-            <PanelHeader
-              step='03'
-              title='Ejecución y resultado'
-              detail='Parámetros validados y registro de auditoría'
-              right={
-                <div className='flex items-center gap-1'>
-                  <Button
-                    variant={resultTab === 'reference' ? 'secondary' : 'ghost'}
-                    size='sm'
-                    className='h-8 text-xs'
-                    onClick={() => setResultTab('reference')}
-                    disabled={!currentComponent}
-                  >
-                    <BookOpen className='size-3.5' />
-                    Referencia
-                  </Button>
-                  <Button
-                    variant={expertMode ? 'secondary' : 'ghost'}
-                    size='sm'
-                    className='h-8 text-xs'
-                    onClick={() => {
-                      if (!expertMode) setCommandInput(generatedCommand)
-                      setExpertMode((current) => !current)
-                    }}
-                    disabled={!currentOperation}
-                  >
-                    <Terminal className='size-3.5' />
-                    {expertMode ? 'Cerrar modo experto' : 'Modo experto'}
-                  </Button>
-                </div>
-              }
-            />
-
-            <div className='space-y-4 border-b p-5'>
-              {currentComponent && currentOperation ? (
-                <>
-                  <div className='flex flex-wrap items-start justify-between gap-3'>
-                    <div className='min-w-0'>
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <Badge variant='outline' className='font-mono'>
-                          {currentComponent.id.toUpperCase()}
-                        </Badge>
-                        <h2 className='text-lg font-semibold'>
-                          {currentOperation.label}
-                        </h2>
-                        <Badge
-                          variant={
-                            currentOperation.mutating
-                              ? 'destructive'
-                              : 'secondary'
+                <form
+                  className='flex items-center gap-2'
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    handleExecute()
+                  }}
+                >
+                  <div className='flex min-w-0 flex-1 items-center rounded-md border bg-background px-3 focus-within:ring-1 focus-within:ring-ring'>
+                    <span className='mr-2 shrink-0 font-mono text-xs text-primary'>
+                      {currentComponent?.id.toUpperCase() ?? 'EMS'}&gt;
+                    </span>
+                    <Input
+                      ref={inputRef}
+                      id='command-line'
+                      aria-label='Comando MML'
+                      placeholder='Escribir comando…'
+                      value={commandInput}
+                      disabled={!currentComponent || executeMutation.isPending}
+                      onFocus={() => {
+                        if (commandInput.trim()) setShowSuggestions(true)
+                      }}
+                      onChange={(event) => {
+                        setCommandInput(event.target.value)
+                        setShowSuggestions(true)
+                        setActiveSuggestionIndex(0)
+                        setParametersOpen(false)
+                        setSelectedOperationId('')
+                        setParamValues({})
+                      }}
+                      onKeyDown={(event) => {
+                        if (showSuggestions && suggestions.length > 0) {
+                          if (event.key === 'ArrowDown') {
+                            event.preventDefault()
+                            setActiveSuggestionIndex(
+                              (prev) => (prev + 1) % suggestions.length
+                            )
+                            return
                           }
-                        >
-                          {currentOperation.mutating ? 'Cambio' : 'Consulta'}
-                        </Badge>
-                      </div>
-                      <p className='mt-1 max-w-3xl text-sm text-muted-foreground'>
-                        {currentOperation.description}
-                      </p>
-                    </div>
-                    <Button
-                      onClick={handleExecute}
-                      disabled={
-                        executeMutation.isPending || !currentOperation.allowed
-                      }
-                      className='min-w-32'
-                    >
-                      <Play
-                        className={cn(
-                          'size-4',
-                          executeMutation.isPending && 'animate-pulse'
-                        )}
-                      />
-                      {executeMutation.isPending ? 'Ejecutando' : 'Ejecutar'}
-                    </Button>
-                  </div>
-
-                  <div className='grid gap-3 rounded-lg border bg-muted/10 p-3 sm:grid-cols-3'>
-                    <ContextItem label='Destino' value={currentComponent.label} />
-                    <ContextItem
-                      label='Servicio'
-                      value={currentComponent.unit}
-                      mono
-                    />
-                    <ContextItem
-                      label='Estado'
-                      value={statusLabel(currentComponent.status)}
-                      status={currentComponent.status}
-                    />
-                  </div>
-
-                  {!!currentOperation.parameters.length && (
-                    <div>
-                      <p className='mb-2 text-xs font-semibold tracking-wide uppercase'>
-                        Parámetros
-                      </p>
-                      <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
-                        {currentOperation.parameters.map((parameter) => (
-                          <ParameterField
-                            key={parameter.id}
-                            parameter={parameter}
-                            value={effectiveParamValues[parameter.id]}
-                            onChange={(value) =>
-                              setParamValues((current) => ({
-                                ...current,
-                                [parameter.id]: value,
-                              }))
+                          if (event.key === 'ArrowUp') {
+                            event.preventDefault()
+                            setActiveSuggestionIndex(
+                              (prev) =>
+                                (prev - 1 + suggestions.length) %
+                                suggestions.length
+                            )
+                            return
+                          }
+                          if (event.key === 'Tab') {
+                            event.preventDefault()
+                            if (suggestions[activeSuggestionIndex]) {
+                              chooseOperation(
+                                suggestions[activeSuggestionIndex].operation,
+                                suggestions[activeSuggestionIndex].component
+                              )
                             }
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                            return
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault()
+                            setShowSuggestions(false)
+                            return
+                          }
+                          if (
+                            event.key === 'Enter' &&
+                            !event.ctrlKey &&
+                            !event.metaKey
+                          ) {
+                            const currentTrim = commandInput
+                              .trim()
+                              .toUpperCase()
+                            const selected = suggestions[activeSuggestionIndex]
+                            if (
+                              selected &&
+                              currentTrim !==
+                                selected.syntax
+                                  .replace(/;$/, '')
+                                  .toUpperCase() &&
+                              currentTrim !== selected.code.toUpperCase()
+                            ) {
+                              event.preventDefault()
+                              chooseOperation(
+                                selected.operation,
+                                selected.component
+                              )
+                              return
+                            }
+                          }
+                        }
 
-                  {currentOperation.mutating && (
-                    <Alert>
-                      <ShieldAlert className='size-4' />
-                      <AlertTitle>Operación con cambio de estado</AlertTitle>
-                      <AlertDescription>
-                        El backend limitará el alcance al nodo seleccionado y
-                        registrará operador, parámetros y resultado.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div>
-                    <div className='mb-2 flex items-center justify-between'>
-                      <Label
-                        htmlFor='command-line'
-                        className='text-xs font-semibold'
-                      >
-                        {expertMode
-                          ? 'Línea de comando editable'
-                          : 'Comando generado'}
-                      </Label>
-                      <span className='text-[10px] text-muted-foreground'>
-                        Ctrl + Enter para ejecutar
-                      </span>
-                    </div>
-                    <div className='flex items-center rounded-md border border-zinc-800 bg-zinc-950 px-3'>
-                      <span className='mr-2 font-mono text-xs text-emerald-400'>
-                        EMS&gt;
-                      </span>
-                      <Input
-                        id='command-line'
-                        value={expertMode ? commandInput : generatedCommand}
-                        readOnly={!expertMode}
-                        onChange={(event) => setCommandInput(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') handleExecute()
-                        }}
-                        className='h-10 border-0 bg-transparent px-0 font-mono text-xs text-zinc-200 shadow-none focus-visible:ring-0'
-                        spellCheck={false}
-                      />
-                    </div>
+                        if (
+                          (event.ctrlKey || event.metaKey) &&
+                          event.key === 'Enter'
+                        ) {
+                          event.preventDefault()
+                          handleExecute()
+                        }
+                      }}
+                      className='h-10 min-w-0 border-0 bg-transparent px-0 font-mono text-xs shadow-none focus-visible:ring-0'
+                      autoComplete='off'
+                      spellCheck={false}
+                    />
                   </div>
-                </>
-              ) : (
-                <EmptyWorkspace />
+                  <Button
+                    type='submit'
+                    disabled={
+                      !commandInput.trim() ||
+                      !currentComponent ||
+                      catalogQuery.isError ||
+                      executeMutation.isPending
+                    }
+                  >
+                    <Play className='size-4' />
+                    Ejecutar
+                  </Button>
+                </form>
+              </div>
+              {parametersOpen && currentOperation && currentComponent && (
+                <div className='grid max-h-40 gap-3 overflow-y-auto pt-2 sm:grid-cols-2 lg:grid-cols-3'>
+                  {currentOperation.parameters.map((parameter) => (
+                    <ParameterField
+                      key={parameter.id}
+                      parameter={parameter}
+                      value={paramValues[parameter.id]}
+                      onChange={(value) => {
+                        const next = { ...paramValues, [parameter.id]: value }
+                        setParamValues(next)
+                        setCommandInput(
+                          stripEnvelope(
+                            toMmlSyntax(
+                              currentOperation,
+                              currentComponent.id,
+                              currentComponent.label,
+                              next
+                            )
+                          )
+                        )
+                      }}
+                    />
+                  ))}
+                </div>
               )}
             </div>
-
             <Tabs
               value={resultTab}
               onValueChange={(value) => setResultTab(value as ResultTab)}
-              className='flex min-h-[300px] flex-1 flex-col gap-0'
+              className='flex min-h-0 flex-1 flex-col gap-0'
             >
-              <div className='flex flex-wrap items-center justify-between gap-2 border-b bg-muted/10 px-4 py-2'>
+              <div className='flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2'>
                 <TabsList className='h-8'>
                   <TabsTrigger value='result' className='text-xs'>
-                    <Terminal className='size-3.5' /> Resultado
+                    <Terminal className='size-3.5' />
+                    Resultado
                   </TabsTrigger>
                   <TabsTrigger value='history' className='text-xs'>
-                    <History className='size-3.5' /> Historial
-                    <span className='text-muted-foreground'>
-                      {historyQuery.data?.length ?? 0}
-                    </span>
-                  </TabsTrigger>
-                  <TabsTrigger value='reference' className='text-xs'>
-                    <BookOpen className='size-3.5' /> Referencia
+                    <History className='size-3.5' />
+                    Historial
                   </TabsTrigger>
                 </TabsList>
                 <div className='flex items-center gap-1'>
-                  {lastResult && (
-                    <Badge
-                      variant='outline'
-                      className={cn(
-                        'mr-2 font-mono text-[10px]',
-                        lastResult.status === 'success'
-                          ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
-                          : 'border-destructive/40 text-destructive'
-                      )}
+                  {executeMutation.isPending && (
+                    <span
+                      role='status'
+                      className='mr-2 text-xs text-muted-foreground'
                     >
-                      RETCODE {lastResult.status === 'success' ? '0' : '1'}
-                    </Badge>
+                      Ejecutando…
+                    </span>
                   )}
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='h-7 text-xs'
                     onClick={copyResult}
                     disabled={!lastResult}
                   >
-                    <Copy className='size-3.5' /> Copiar
+                    <Copy className='size-3.5' />
+                    Copiar
                   </Button>
                   <Button
                     variant='ghost'
                     size='sm'
-                    className='h-7 text-xs'
                     onClick={downloadResult}
                     disabled={!lastResult}
                   >
-                    <Download className='size-3.5' /> Exportar
+                    <Download className='size-3.5' />
+                    Exportar
                   </Button>
                 </div>
               </div>
-
-              <TabsContent value='result' className='m-0 min-h-0 flex-1'>
+              <TabsContent
+                value='result'
+                className='m-0 min-h-0 flex-1 overflow-auto'
+              >
                 <CommandResult result={lastResult} command={lastMmlCommand} />
               </TabsContent>
-              <TabsContent value='history' className='m-0 min-h-0 flex-1'>
-                <CommandHistory
-                  runs={historyQuery.data ?? []}
-                  loading={historyQuery.isLoading}
-                  onLoad={loadHistory}
-                />
-              </TabsContent>
-              <TabsContent value='reference' className='m-0 min-h-0 flex-1'>
-                <CommandReference component={currentComponent} />
+              <TabsContent
+                value='history'
+                className='m-0 min-h-0 flex-1 overflow-auto'
+              >
+                {historyQuery.isError ? (
+                  <EmptyList text='No se pudo cargar el historial.' />
+                ) : (
+                  <CommandHistory
+                    runs={historyQuery.data ?? []}
+                    loading={historyQuery.isLoading}
+                    onLoad={loadHistory}
+                  />
+                )}
               </TabsContent>
             </Tabs>
           </section>
         </div>
       </Card>
+
+      <Dialog open={catalogOpen} onOpenChange={setCatalogOpen}>
+        <DialogContent className='sm:max-w-xl'>
+          <DialogHeader>
+            <DialogTitle>Catálogo · {currentComponent?.label}</DialogTitle>
+            <DialogDescription>Seleccionar comando</DialogDescription>
+          </DialogHeader>
+          <SearchInput
+            value={operationSearch}
+            onChange={setOperationSearch}
+            placeholder='Buscar comando…'
+            label='Buscar comandos'
+          />
+          <div className='max-h-[55vh] space-y-4 overflow-y-auto'>
+            {groupedOperations.map(([category, operations]) => (
+              <div key={category}>
+                <p className='px-2 py-1 text-xs text-muted-foreground'>
+                  {category}
+                </p>
+                {operations.map((operation) => (
+                  <OperationButton
+                    key={operation.id}
+                    operation={operation}
+                    code={operationCode(operation, currentComponent)}
+                    selected={operation.id === currentOperation?.id}
+                    onSelect={() => chooseOperation(operation)}
+                  />
+                ))}
+              </div>
+            ))}
+            {!visibleOperations.length && (
+              <EmptyList text='Sin coincidencias' />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={manualOpen} onOpenChange={setManualOpen}>
+        <DialogContent className='sm:max-w-3xl'>
+          <DialogHeader>
+            <DialogTitle>Manual de comandos</DialogTitle>
+            <DialogDescription>
+              Referencia del catálogo disponible · {currentComponent?.label}
+            </DialogDescription>
+          </DialogHeader>
+          <CommandReference component={currentComponent} />
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!confirmation}
+        onOpenChange={(open) => {
+          if (!open) setConfirmation(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar operación</DialogTitle>
+            <DialogDescription>
+              Esta acción puede interrumpir el servicio o las sesiones del nodo
+              seleccionado.
+            </DialogDescription>
+          </DialogHeader>
+          <p className='font-mono text-sm'>
+            {confirmation?.component_id.toUpperCase()} ·{' '}
+            {confirmation?.operation_id}
+          </p>
+          <pre className='overflow-auto rounded border p-3 text-xs'>
+            {JSON.stringify(confirmation?.parameters, null, 2)}
+          </pre>
+          <div className='flex justify-end gap-2'>
+            <Button variant='outline' onClick={() => setConfirmation(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant='destructive'
+              disabled={executeMutation.isPending}
+              onClick={() => {
+                if (confirmation) submit(confirmation)
+              }}
+            >
+              Confirmar ejecución
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </EmsPage>
   )
 }
 
-function PanelHeader({
-  step,
-  title,
-  detail,
-  right,
-}: {
-  step: string
-  title: string
-  detail: string
-  right?: React.ReactNode
-}) {
-  return (
-    <header className='flex min-h-16 items-center justify-between gap-2 border-b px-4 py-3'>
-      <div className='min-w-0'>
-        <div className='flex items-center gap-2'>
-          <span className='font-mono text-[10px] font-semibold text-primary'>
-            {step}
-          </span>
-          <h2 className='truncate text-sm font-semibold'>{title}</h2>
-        </div>
-        <p className='mt-0.5 truncate text-[11px] text-muted-foreground'>
-          {detail}
-        </p>
-      </div>
-      {right}
-    </header>
-  )
-}
-
-function CommandReference({
-  component,
-}: {
-  component?: ComponentOperations
-}) {
+function CommandReference({ component }: { component?: ComponentOperations }) {
   if (!component) return <EmptyList text='Seleccione un elemento de red.' />
 
   return (
-    <ScrollArea className='h-[300px]'>
+    <ScrollArea className='h-[65vh]'>
       <div className='space-y-5 p-5'>
         <div>
           <h3 className='text-sm font-semibold'>Referencia operativa</h3>
           <p className='mt-1 text-xs text-muted-foreground'>
             Sintaxis controlada del EMS para {component.label}. Cada código se
             traduce a una operación validada del backend; no abre una terminal
-            Linux libre.
+            Linux libre. Seleccione un nodo y escriba un comando, o insértelo
+            desde Catálogo. Enter o Ctrl + Enter ejecutan una sola operación. Si
+            omite NF, se utiliza el nodo seleccionado; otro destino explícito se
+            rechaza. El historial permite recuperar resultados y comandos, sin
+            volver a ejecutarlos.
           </p>
         </div>
 
@@ -749,6 +978,37 @@ function CommandReference({
                   <p className='text-[11px] text-muted-foreground'>
                     {operation.description}
                   </p>
+                  <code className='mt-2 block text-[11px] break-all'>
+                    {stripEnvelope(
+                      toMmlSyntax(
+                        operation,
+                        component.id,
+                        component.label,
+                        parameterDefaults(operation)
+                      )
+                    )}
+                  </code>
+                  {operation.parameters.map((parameter) => (
+                    <p
+                      key={parameter.id}
+                      className='mt-1 text-xs text-muted-foreground'
+                    >
+                      <strong>{parameter.id}</strong> · {parameter.type}
+                      {parameter.required ? ' · obligatorio' : ''}
+                      {parameter.minimum !== undefined
+                        ? ' · mínimo ' + parameter.minimum
+                        : ''}
+                      {parameter.maximum !== undefined
+                        ? ' · máximo ' + parameter.maximum
+                        : ''}{' '}
+                      — {parameter.description ?? parameter.label}
+                    </p>
+                  ))}
+                  {operation.mutating && (
+                    <p className='mt-1 text-xs text-amber-600'>
+                      Cambia el estado del nodo. Requiere confirmación.
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
@@ -756,8 +1016,8 @@ function CommandReference({
         </div>
 
         <div className='rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-200'>
-          <span className='text-emerald-400'>Formato:</span>{' '}
-          VERBO OBJETO: PARAMETRO=&quot;valor&quot;;
+          <span className='text-emerald-400'>Formato:</span> VERBO OBJETO:
+          PARAMETRO=&quot;valor&quot;;
         </div>
       </div>
     </ScrollArea>
@@ -802,6 +1062,7 @@ function NodeButton({
     <button
       type='button'
       onClick={onSelect}
+      aria-pressed={selected}
       className={cn(
         'group flex w-full items-center gap-3 rounded-md border border-transparent px-3 py-2.5 text-left transition-colors',
         selected
@@ -819,7 +1080,9 @@ function NodeButton({
       </span>
       <span className='min-w-0 flex-1'>
         <span className='flex items-center gap-2'>
-          <span className='truncate text-sm font-medium'>{component.label}</span>
+          <span className='truncate text-sm font-medium'>
+            {component.label}
+          </span>
           <span
             className={cn(
               'size-1.5 shrink-0 rounded-full',
@@ -833,7 +1096,7 @@ function NodeButton({
           />
         </span>
         <span className='block truncate font-mono text-[10px] text-muted-foreground'>
-          {component.id.toUpperCase()} · {component.operations.length} operaciones
+          {component.node_id ?? component.unit}
         </span>
       </span>
       <ChevronRight
@@ -915,7 +1178,10 @@ function ParameterField({
           </SelectTrigger>
           <SelectContent>
             {parameter.options?.map((option) => (
-              <SelectItem key={String(option.value)} value={String(option.value)}>
+              <SelectItem
+                key={String(option.value)}
+                value={String(option.value)}
+              >
                 {option.label}
               </SelectItem>
             ))}
@@ -937,44 +1203,6 @@ function ParameterField({
           className='h-9 text-xs'
         />
       )}
-      {parameter.description && (
-        <p className='text-[10px] text-muted-foreground'>
-          {parameter.description}
-        </p>
-      )}
-    </div>
-  )
-}
-
-function ContextItem({
-  label,
-  value,
-  mono,
-  status,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-  status?: string
-}) {
-  return (
-    <div className='min-w-0'>
-      <p className='text-[10px] font-semibold tracking-wide text-muted-foreground uppercase'>
-        {label}
-      </p>
-      <div className='mt-1 flex items-center gap-2'>
-        {status && (
-          <span
-            className={cn(
-              'size-1.5 rounded-full',
-              status === 'running' ? 'bg-emerald-500' : 'bg-amber-500'
-            )}
-          />
-        )}
-        <p className={cn('truncate text-xs font-medium', mono && 'font-mono')}>
-          {value}
-        </p>
-      </div>
     </div>
   )
 }
@@ -986,40 +1214,19 @@ function CommandResult({
   result: OperationResult | null
   command: string
 }) {
-  if (!result) {
+  if (!result)
     return (
-      <div className='flex h-full min-h-72 items-center justify-center p-8 text-center'>
-        <div className='max-w-sm'>
-          <Terminal className='mx-auto size-8 text-muted-foreground/50' />
-          <p className='mt-3 text-sm font-medium'>Sin resultados todavía</p>
-          <p className='mt-1 text-xs text-muted-foreground'>
-            Seleccione un nodo y una operación. El resultado aparecerá aquí sin
-            abandonar la vista.
-          </p>
-        </div>
+      <div className='flex h-full min-h-40 items-center justify-center font-mono text-xs text-muted-foreground'>
+        Consola lista
       </div>
     )
-  }
   return (
-    <ScrollArea className='h-[300px] xl:h-full'>
-      <div className='space-y-3 p-4'>
-        <div className='grid gap-3 rounded-md border bg-muted/10 p-3 sm:grid-cols-4'>
-          <ContextItem
-            label='Resultado'
-            value={result.status === 'success' ? 'Exitoso' : 'Fallido'}
-          />
-          <ContextItem label='Fuente' value={result.source} mono />
-          <ContextItem label='Duración' value={`${result.duration_ms} ms`} mono />
-          <ContextItem
-            label='Operador'
-            value={`${result.username} · ${result.role}`}
-          />
-        </div>
-        <pre className='min-h-48 overflow-x-auto rounded-md border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap text-zinc-300'>
-          {formatTelcoReport(result, command)}
-        </pre>
-      </div>
-    </ScrollArea>
+    <pre
+      aria-label='Salida del comando'
+      className='min-h-full overflow-auto p-5 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap'
+    >
+      {formatTelcoReport(result, command)}
+    </pre>
   )
 }
 
@@ -1033,7 +1240,7 @@ function CommandHistory({
   onLoad: (run: OperationRun) => void
 }) {
   return (
-    <ScrollArea className='h-[300px] xl:h-full'>
+    <ScrollArea className='h-full'>
       <div className='divide-y'>
         {loading && !runs.length ? (
           <LoadingRows count={4} />
@@ -1070,20 +1277,6 @@ function CommandHistory({
         )}
       </div>
     </ScrollArea>
-  )
-}
-
-function EmptyWorkspace() {
-  return (
-    <div className='flex min-h-64 items-center justify-center text-center'>
-      <div className='max-w-xs'>
-        <Network className='mx-auto size-8 text-muted-foreground/50' />
-        <p className='mt-3 text-sm font-medium'>Seleccione un elemento de red</p>
-        <p className='mt-1 text-xs text-muted-foreground'>
-          Luego elija una operación para configurar sus parámetros y ejecutarla.
-        </p>
-      </div>
-    </div>
   )
 }
 

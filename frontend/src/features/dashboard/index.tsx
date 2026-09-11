@@ -1,10 +1,9 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
   AlertTriangle,
-  ArrowDownToLine,
-  Flame,
   Network,
   Radio,
   RotateCcw,
@@ -14,7 +13,6 @@ import {
 import { toast } from 'sonner'
 import {
   api,
-  type Alarm,
   type Experiment,
   type Metrics,
   type RuntimeSnapshot,
@@ -23,6 +21,13 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
 import { ProfileDropdown } from '@/components/profile-dropdown'
@@ -31,40 +36,60 @@ import { ThemeSwitch } from '@/components/theme-switch'
 import { EmsTopology } from '@/features/topology/ems-topology'
 
 export function Dashboard() {
-  const scenarioId = '5g-sa'
-  const [isPinging, setIsPinging] = useState(false)
+  const [scenario, setScenario] = useState<'5g-sa' | '4g-epc'>('5g-sa')
 
   const status = useQuery({
-    queryKey: ['status', scenarioId],
+    queryKey: ['status', scenario],
     queryFn: async () =>
-      (await api.get<ScenarioStatus>(`/scenarios/${scenarioId}/status`)).data,
+      (await api.get<ScenarioStatus>(`/scenarios/${scenario}/status`)).data,
     refetchInterval: 3000,
   })
 
   const runtime = useQuery({
-    queryKey: ['runtime', scenarioId],
+    queryKey: ['runtime', scenario],
     queryFn: async () =>
-      (await api.get<RuntimeSnapshot>(`/runtime/${scenarioId}`)).data,
+      (await api.get<RuntimeSnapshot>(`/runtime/${scenario}`)).data,
     refetchInterval: 3000,
   })
 
-  const alarms = useQuery({
-    queryKey: ['alarms', scenarioId],
-    queryFn: async () => (await api.get<Alarm[]>(`/alarms/${scenarioId}`)).data,
+  const alarmCenter = useQuery({
+    queryKey: ['alarm-center', scenario],
+    queryFn: async () =>
+      (
+        await api.get<{
+          items: {
+            id: string
+            component: string
+            node_id?: string
+            network_function: string
+            severity: string
+            message: string
+            evidence?: string
+            procedures?: string[]
+            first_seen: number
+            masked?: boolean
+            silenced_until?: number
+          }[]
+          counts: Record<string, number>
+          total: number
+        }>(`/alarm-center/${scenario}`, {
+          params: { visibility: 'visible' },
+        })
+      ).data,
     refetchInterval: 3000,
   })
 
   const metrics = useQuery({
-    queryKey: ['metrics', scenarioId],
+    queryKey: ['metrics', scenario],
     queryFn: async () =>
-      (await api.get<Metrics>(`/metrics?scenario_id=${scenarioId}`)).data,
+      (await api.get<Metrics>(`/metrics?scenario_id=${scenario}`)).data,
     refetchInterval: 2500,
   })
 
   const experiments = useQuery({
-    queryKey: ['experiments', scenarioId],
+    queryKey: ['experiments', scenario],
     queryFn: async () =>
-      (await api.get<Experiment[]>(`/experiments/catalog/${scenarioId}`)).data,
+      (await api.get<Experiment[]>(`/experiments/catalog/${scenario}`)).data,
     refetchInterval: 3000,
   })
 
@@ -75,7 +100,7 @@ export function Dashboard() {
     const isInjected = exp.state?.status === 'injected'
     const action = isInjected ? 'recover' : 'inject'
     try {
-      const resp = await api.post(`/experiments/${exp.id}/${action}?scenario_id=${scenarioId}`)
+      const resp = await api.post(`/experiments/${exp.id}/${action}?scenario_id=${scenario}`)
       if (action === 'inject') {
         toast.error(`Falla inyectada: ${exp.title}`, {
           description: resp.data.state?.message || 'Condición de falla activada.',
@@ -88,7 +113,7 @@ export function Dashboard() {
       await Promise.all([
         experiments.refetch(),
         status.refetch(),
-        alarms.refetch(),
+        alarmCenter.refetch(),
         runtime.refetch(),
         metrics.refetch(),
       ])
@@ -103,40 +128,6 @@ export function Dashboard() {
     status.data?.components.filter((item) => item.status === 'running')
       .length ?? 0
   const total = status.data?.components.length ?? 0
-
-  const handlePing = async () => {
-    setIsPinging(true)
-    try {
-      const resp = await api.post('/traffic/ping?count=3')
-      if (resp.data.success) {
-        toast.success('Tráfico 5G completado: 3 paquetes ICMP transmitidos y recibidos')
-      } else {
-        toast.warning('Ping ejecutado pero se detectaron pérdidas')
-      }
-      await metrics.refetch()
-    } catch {
-      toast.error('No se pudo generar tráfico desde el namespace del UE')
-    } finally {
-      setIsPinging(false)
-    }
-  }
-
-  const exportEvidence = async (format: 'json' | 'csv') => {
-    try {
-      const response = await api.get(`/audit/evidence/${scenarioId}/${format}`, {
-        responseType: 'blob',
-      })
-      const url = URL.createObjectURL(response.data)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `evidencia_${scenarioId}_${new Date().toISOString().slice(0, 10)}.${format}`
-      link.click()
-      URL.revokeObjectURL(url)
-      toast.success(`Evidencia exportada como ${format.toUpperCase()}`)
-    } catch {
-      toast.error('No se pudo exportar la evidencia del laboratorio')
-    }
-  }
 
   const ogstunTraffic = metrics.data?.interfaces?.ogstun
   const totalUserPlaneKbps = (ogstunTraffic?.rx_kbps ?? 0) + (ogstunTraffic?.tx_kbps ?? 0)
@@ -153,8 +144,8 @@ export function Dashboard() {
       <Main className='overflow-y-auto pb-10'>
         <div className='mb-6 flex flex-wrap items-end justify-between gap-4'>
           <div>
-            <p className='text-xs font-semibold tracking-[.18em] text-primary'>
-              EMS EDUCATIVO · 5G SA
+            <p className='text-xs font-semibold tracking-[.18em] text-primary uppercase'>
+              EMS EDUCATIVO · {scenario === '5g-sa' ? '5G STANDALONE' : '4G EPC'}
             </p>
             <h1 className='text-3xl font-bold tracking-tight'>
               Centro de operación y telemetría
@@ -164,6 +155,18 @@ export function Dashboard() {
             </p>
           </div>
           <div className='flex items-center gap-2'>
+            <Select
+              value={scenario}
+              onValueChange={(val) => setScenario(val as '5g-sa' | '4g-epc')}
+            >
+              <SelectTrigger className='h-8 w-44 text-xs font-medium'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='5g-sa'>5G Standalone</SelectItem>
+                <SelectItem value='4g-epc'>4G EPC</SelectItem>
+              </SelectContent>
+            </Select>
             <Badge
               variant={status.data?.state === 'running' ? 'default' : 'destructive'}
               className='px-3 py-1 text-xs font-medium tracking-wide uppercase'
@@ -218,7 +221,10 @@ export function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className='flex-1 h-[340px]'>
-              <EmsTopology components={status.data?.components ?? []} />
+              <EmsTopology
+                components={status.data?.components ?? []}
+                alarms={alarmCenter.data?.items ?? []}
+              />
             </CardContent>
           </Card>
 
@@ -238,23 +244,48 @@ export function Dashboard() {
             <Card className='max-h-[260px] overflow-auto'>
               <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between'>
-                  <CardTitle className='text-sm font-medium'>Alarmas Telco Activas</CardTitle>
-                  <Badge variant={alarms.data?.length ? 'destructive' : 'secondary'}>
-                    {alarms.data?.length ?? 0}
-                  </Badge>
+                  <div className='flex items-center gap-2'>
+                    <CardTitle className='text-sm font-medium'>Alarmas Telco Activas</CardTitle>
+                    <Link to='/alarms' className='text-[11px] text-primary hover:underline'>
+                      Ver todas →
+                    </Link>
+                  </div>
+                  <div className='flex items-center gap-1 font-mono text-[10px]'>
+                    {alarmCenter.data?.counts?.critical ? (
+                      <span className='rounded bg-red-600 px-1.5 py-0.5 font-bold text-white shadow-xs'>
+                        {alarmCenter.data.counts.critical} CRIT
+                      </span>
+                    ) : null}
+                    {alarmCenter.data?.counts?.major ? (
+                      <span className='rounded bg-amber-500 px-1.5 py-0.5 font-bold text-white shadow-xs'>
+                        {alarmCenter.data.counts.major} MAJ
+                      </span>
+                    ) : null}
+                    <Badge variant={alarmCenter.data?.total ? 'destructive' : 'secondary'}>
+                      {alarmCenter.data?.total ?? 0}
+                    </Badge>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className='space-y-2'>
-                {alarms.data?.length ? (
-                  alarms.data.map((alarm) => (
+                {alarmCenter.data?.items?.length ? (
+                  alarmCenter.data.items.map((alarm) => (
                     <div key={alarm.id} className='rounded-lg border p-2.5 text-xs'>
                       <div className='flex items-center justify-between'>
                         <b className='font-semibold'>{alarm.network_function || alarm.component}</b>
-                        <Badge variant='destructive' className='text-[10px] uppercase'>
+                        <Badge
+                          variant={alarm.severity === 'critical' ? 'destructive' : 'secondary'}
+                          className={`text-[9px] uppercase font-mono ${alarm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
+                        >
                           {alarm.severity}
                         </Badge>
                       </div>
                       <p className='mt-1 text-muted-foreground'>{alarm.message}</p>
+                      {alarm.evidence && (
+                        <p className='mt-0.5 font-mono text-[10px] text-muted-foreground/80'>
+                          {alarm.evidence}
+                        </p>
+                      )}
                       {alarm.procedures && alarm.procedures.length > 0 && (
                         <p className='mt-0.5 text-[10px] text-primary/80'>
                           Procedimiento: {alarm.procedures.join(', ')}
@@ -264,7 +295,7 @@ export function Dashboard() {
                   ))
                 ) : (
                   <div className='grid h-24 place-items-center text-xs text-muted-foreground'>
-                    Sin alarmas activas · Testbed saludable
+                    Sin incidentes activos · Testbed saludable
                   </div>
                 )}
               </CardContent>

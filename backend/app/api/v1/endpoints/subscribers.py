@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.api.deps import current_user, operator_user
 from app.db import add_audit
-from app.models import SubscriberCreate, UserPublic
+from app.models import SubscriberCreate, SubscriberUpdate, UserPublic
 from app.services.subscribers import subscriber_service
 
 router = APIRouter(prefix="/subscribers", tags=["subscribers"])
@@ -13,6 +13,25 @@ def list_subscribers(_: UserPublic = Depends(current_user)):
     return subscriber_service.list()
 
 
+@router.get("/{imsi}/status")
+def subscriber_status(imsi: str, _: UserPublic = Depends(current_user)):
+    statuses = subscriber_service.get_live_status(imsi)
+    status = statuses.get(imsi)
+    if not status:
+        return {
+            "registered": False,
+            "cm_state": "CM-IDLE",
+            "rm_state": "RM-DEREGISTERED",
+            "mm_state": "MM-DEREGISTERED",
+            "cell_id": None,
+            "tac": None,
+            "guti": None,
+            "pdu_sessions": [],
+            "active_ip": None,
+        }
+    return status
+
+
 @router.post("", status_code=201)
 def create(payload: SubscriberCreate, user: UserPublic = Depends(operator_user)):
     try:
@@ -21,6 +40,18 @@ def create(payload: SubscriberCreate, user: UserPublic = Depends(operator_user))
         return result
     except ValueError as exc:
         raise HTTPException(409, str(exc))
+
+
+@router.put("/{imsi}")
+def update(imsi: str, payload: SubscriberUpdate, user: UserPublic = Depends(operator_user)):
+    try:
+        result = subscriber_service.update(imsi, payload)
+        add_audit(user.username, user.role, user.testbed, "subscriber.update", {"imsi": imsi}, "success")
+        return result
+    except KeyError:
+        raise HTTPException(404, "Suscriptor no encontrado")
+    except Exception as exc:
+        raise HTTPException(500, f"Error actualizando suscriptor: {exc}")
 
 
 @router.delete("/{imsi}", status_code=204)

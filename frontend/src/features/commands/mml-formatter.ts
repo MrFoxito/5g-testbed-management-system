@@ -1,6 +1,13 @@
-import type { OperationDefinition, OperationResult, OperationsCatalog } from './types'
+import type {
+  OperationDefinition,
+  OperationResult,
+  OperationsCatalog,
+} from './types'
 
-export const MML_TO_OP: Record<string, { opId: string; defaultTarget?: string }> = {
+export const MML_TO_OP: Record<
+  string,
+  { opId: string; defaultTarget?: string }
+> = {
   'DSP GNB-STATUS': { opId: 'gnb.status', defaultTarget: 'gnb' },
   'DSP GNB-INFO': { opId: 'gnb.info', defaultTarget: 'gnb' },
   'LST GNB-AMF': { opId: 'gnb.amf-list', defaultTarget: 'gnb' },
@@ -100,7 +107,11 @@ export function toMmlSyntax(
     codeMap[operation.id] ??
     `${operation.mutating ? 'SET' : 'DSP'} ${componentId.toUpperCase()}-${operation.id.replace('.', '-').toUpperCase()}`
 
-  if (operation.id.startsWith('system.') || operation.id.startsWith('network.') || operation.id.startsWith('software.')) {
+  if (
+    operation.id.startsWith('system.') ||
+    operation.id.startsWith('network.') ||
+    operation.id.startsWith('software.')
+  ) {
     paramPairs.unshift(`NF="${componentLabel}"`)
   }
 
@@ -158,11 +169,23 @@ export function parseMmlCommand(
   if (paramsStr) {
     const regex = /([A-Za-z0-9_]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^,;\s]+))/g
     let match
+    let consumed = 0
     while ((match = regex.exec(paramsStr)) !== null) {
+      const separator = paramsStr.slice(consumed, match.index).trim()
+      if (separator !== (consumed ? ',' : '')) {
+        return { success: false, error: 'Sintaxis de parámetros no válida.' }
+      }
+      consumed = regex.lastIndex
       const key = match[1].toLowerCase()
+      if (Object.prototype.hasOwnProperty.call(rawParams, key)) {
+        return { success: false, error: `Parámetro duplicado: ${key}.` }
+      }
       const valStr = match[2] ?? match[3] ?? match[4]
       const numVal = Number(valStr)
       rawParams[key] = !isNaN(numVal) && valStr.trim() !== '' ? numVal : valStr
+    }
+    if (paramsStr.slice(consumed).trim()) {
+      return { success: false, error: 'Sintaxis de parámetros no válida.' }
     }
   }
 
@@ -186,6 +209,11 @@ export function parseMmlCommand(
     )
     if (found) {
       targetCompId = found.id
+    } else {
+      return {
+        success: false,
+        error: 'La NF indicada no existe en este escenario.',
+      }
     }
   }
 
@@ -213,6 +241,17 @@ export function parseMmlCommand(
   }
 
   // Mapear parámetros a los esperados por el backend
+  const permitted = new Set([
+    'nf',
+    ...operation.parameters.map((p) => p.id.toLowerCase()),
+  ])
+  if (permitted.has('node_name')) permitted.add('node')
+  const unknown = Object.keys(rawParams).filter((key) => !permitted.has(key))
+  if (unknown.length)
+    return {
+      success: false,
+      error: `Parámetros no soportados: ${unknown.join(', ')}.`,
+    }
   const cleanParams: Record<string, unknown> = {}
   for (const p of operation.parameters) {
     if (rawParams[p.id.toLowerCase()] !== undefined) {
@@ -247,7 +286,8 @@ export function formatTelcoReport(
 ): string {
   const timestamp = new Date(result.started_at).toLocaleString()
   const retCode = result.status === 'success' ? '0' : '1'
-  const retMsg = result.status === 'success' ? 'Operation Succeeded' : 'Operation Failed'
+  const retMsg =
+    result.status === 'success' ? 'Operation Succeeded' : 'Operation Failed'
 
   const border = '-'.repeat(70)
 

@@ -305,7 +305,8 @@ class MetricsService:
         }
 
 
-async def collect_alarms(scenario_id: str) -> list[dict]:
+async def collect_alarms(scenario_id: str, evaluated: set[str] | None = None) -> list[dict]:
+    evaluated = evaluated if evaluated is not None else set()
     status, runtime = await asyncio.gather(
         scenario_manager.status(scenario_id),
         scenario_manager.adapter.runtime_snapshot(),
@@ -313,7 +314,9 @@ async def collect_alarms(scenario_id: str) -> list[dict]:
     alarms = []
     observed_at = datetime.now(timezone.utc).isoformat()
     for component in status.components:
-        if component.status != "running":
+        if component.status in {"running", "stopped", "failed"}:
+            evaluated.add(f"{scenario_id}:{component.id}:service-down")
+        if component.status in {"stopped", "failed"}:
             severity = Severity.critical if component.kind in {"database", "core"} else Severity.major
             alarms.append({"id": f"{scenario_id}:{component.id}:service-down", "scenario_id": scenario_id, "component": component.id, "network_function": component.label, "node_id": component.node_id, "severity": severity, "state": "active", "probable_cause": "serviceUnavailable", "interfaces": component.interfaces, "procedures": component.procedures, "message": f"{component.label} no está activo", "evidence": f"{component.unit} = {component.status}", "recommendation": f"Revisar el servicio {component.unit} y sus dependencias", "observed_at": observed_at})
 
@@ -323,6 +326,7 @@ async def collect_alarms(scenario_id: str) -> list[dict]:
             if component.status != "running":
                 continue
             for endpoint in component.expected_endpoints:
+                evaluated.add(f"{scenario_id}:{component.id}:port:{endpoint['protocol']}:{endpoint['port']}")
                 key = (endpoint["protocol"], endpoint["address"], endpoint["port"])
                 if key in observed:
                     continue
@@ -345,13 +349,22 @@ async def collect_alarms(scenario_id: str) -> list[dict]:
                     ("ue", "PDU Session establishment is successful", ["Sending PDU Session Establishment Request"], "N1/N4", "PDU Session Establishment", "UE sin PDU Session confirmada"),
                 ]
                 for component_id, marker, invalidators, interface_name, procedure, message in checks:
-                    if component_id not in current_logs or _marker_is_current(current_logs[component_id], marker, invalidators):
+                    if component_id not in current_logs:
                         continue
+                    procedure_key = f"{scenario_id}:{component_id}:procedure:{procedure.lower().replace(' ', '-')}"
+                    if _marker_is_current(current_logs[component_id], marker, invalidators):
+                        evaluated.add(procedure_key)
+                        continue
+                    # An empty/truncated log is not evidence of failure or recovery.
+                    if not any(token in current_logs[component_id] for token in invalidators):
+                        continue
+                    evaluated.add(procedure_key)
                     component = by_id[component_id]
                     alarms.append({"id": f"{scenario_id}:{component_id}:procedure:{procedure.lower().replace(' ', '-')}", "scenario_id": scenario_id, "component": component_id, "network_function": component.label, "node_id": component.node_id, "severity": Severity.major, "state": "active", "probable_cause": "procedureFailure", "interfaces": interface_name.split("/"), "procedures": [procedure], "message": message, "evidence": f"No aparece '{marker}' desde la última activación del servicio", "recommendation": f"Revisar logs de {component.label} y capturar {interface_name}", "observed_at": observed_at})
 
     try:
         ip_forward_active = await scenario_manager.adapter.get_ip_forward()
+        evaluated.add(f"{scenario_id}:ops-f01:forwarding-disabled")
         if not ip_forward_active:
             upf_comp = next((c for c in status.components if c.id == "upf"), None)
             alarms.append({
@@ -376,7 +389,9 @@ async def collect_alarms(scenario_id: str) -> list[dict]:
     try:
         from app.services.experiments import experiments_service
         exp_f01 = experiments_service.active_state.get("5g-f01", {})
-        if exp_f01.get("status") == "injected":
+        if scenario_id == "5g-sa":
+            evaluated.add(f"{scenario_id}:5g-f01:authentication-rejected")
+        if scenario_id == "5g-sa" and exp_f01.get("status") == "injected":
             udm_comp = next((c for c in status.components if c.id == "udm"), None)
             alarms.append({
                 "id": f"{scenario_id}:5g-f01:authentication-rejected",

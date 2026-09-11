@@ -1,5 +1,4 @@
 import {
-  Activity,
   ChartNoAxesCombined,
   FileCode2,
   LayoutDashboard,

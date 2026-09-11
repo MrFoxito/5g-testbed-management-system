@@ -1,10 +1,42 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Activity,
+  Check,
+  Copy,
+  Edit,
+  Eye,
+  Globe,
+  Plus,
+  Radio,
+  RefreshCw,
+  Shield,
+  Trash2,
+  UserPlus,
+  Users,
+  Wifi,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
-import { api, canOperate } from '@/lib/api'
+import { api, apiErrorMessage, canOperate } from '@/lib/api'
+import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -17,129 +49,811 @@ import {
 } from '@/components/ui/table'
 import { EmsPage } from '@/features/ems-page'
 
+type PduSession = {
+  session_id?: string
+  state?: string
+  type?: string
+  apn?: string
+  address?: string
+  ambr?: string
+}
+
+type SubscriberLiveStatus = {
+  registered: boolean
+  cm_state: string
+  rm_state: string
+  mm_state: string
+  cell_id?: string | null
+  tac?: string | null
+  guti?: string | null
+  pdu_sessions?: PduSession[]
+  active_ip?: string | null
+}
+
 type Subscriber = {
   imsi: string
-  security: { k: string; opc: string }
-  slice: { sst: number }[]
+  security: { k: string; opc: string; amf?: string }
+  slice: {
+    sst: number
+    sd?: string
+    session?: { name: string; type?: number }[]
+  }[]
+  live_status?: SubscriberLiveStatus
 }
-const initial = {
-  imsi: '',
-  key: '',
-  opc: '',
+
+const defaultCreate = {
+  imsi: '999700000000002',
+  key: '465B5CE8B199B49FAA5F0A2EE238A6BC',
+  opc: 'E8ED289DEBA952E4283B54E88E6183CA',
   amf: '8000',
   apn_dnn: 'internet',
   sst: 1,
   sd: '000001',
 }
+
 export function SubscribersPage() {
-  const client = useQueryClient()
+  const queryClient = useQueryClient()
   const role = useAuthStore((s) => s.auth.user?.role)
-  const [form, setForm] = useState(initial)
+  const isOperator = canOperate(role)
+
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'registered' | 'offline'>('all')
+
+  // Modals state
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm, setCreateForm] = useState(defaultCreate)
+
+  const [detailSub, setDetailSub] = useState<Subscriber | null>(null)
+
+  const [editSub, setEditSub] = useState<Subscriber | null>(null)
+  const [editForm, setEditForm] = useState({
+    key: '',
+    opc: '',
+    amf: '8000',
+    apn_dnn: 'internet',
+    sst: 1,
+    sd: '000001',
+  })
+
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [copiedImsi, setCopiedImsi] = useState<string | null>(null)
+
   const query = useQuery({
     queryKey: ['subscribers'],
     queryFn: async () => (await api.get<Subscriber[]>('/subscribers')).data,
+    refetchInterval: 5000,
   })
-  const mutation = useMutation({
-    mutationFn: () => api.post('/subscribers', form),
+
+  const createMutation = useMutation({
+    mutationFn: (payload: typeof defaultCreate) =>
+      api.post('/subscribers', payload),
     onSuccess: () => {
-      toast.success('Suscriptor creado')
-      setForm(initial)
-      client.invalidateQueries({ queryKey: ['subscribers'] })
+      toast.success('Suscriptor aprovisionado exitosamente en Open5GS')
+      setCreateOpen(false)
+      setCreateForm(defaultCreate)
+      void queryClient.invalidateQueries({ queryKey: ['subscribers'] })
     },
-    onError: () => toast.error('No se pudo crear el suscriptor'),
+    onError: (error) =>
+      toast.error('No se pudo aprovisionar el suscriptor', {
+        description: apiErrorMessage(error, 'El IMSI ya existe o formato incorrecto.'),
+      }),
   })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ imsi, payload }: { imsi: string; payload: Record<string, unknown> }) =>
+      api.put(`/subscribers/${imsi}`, payload),
+    onSuccess: () => {
+      toast.success('Perfil de suscriptor actualizado')
+      setEditSub(null)
+      void queryClient.invalidateQueries({ queryKey: ['subscribers'] })
+    },
+    onError: (error) =>
+      toast.error('No se pudo actualizar el suscriptor', {
+        description: apiErrorMessage(error, 'Verifique los parámetros ingresados.'),
+      }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (imsi: string) => api.delete(`/subscribers/${imsi}`),
+    onSuccess: () => {
+      toast.success('Suscriptor eliminado de la base de datos')
+      setDeleteTarget(null)
+      void queryClient.invalidateQueries({ queryKey: ['subscribers'] })
+    },
+    onError: (error) =>
+      toast.error('No se pudo eliminar el suscriptor', {
+        description: apiErrorMessage(error, 'Error al contactar con la base de datos.'),
+      }),
+  })
+
+  const subscribers = query.data ?? []
+
+  const registeredCount = useMemo(
+    () => subscribers.filter((s) => s.live_status?.registered).length,
+    [subscribers]
+  )
+  const pduSessionCount = useMemo(
+    () =>
+      subscribers.filter(
+        (s) => (s.live_status?.pdu_sessions?.length ?? 0) > 0
+      ).length,
+    [subscribers]
+  )
+
+  const filteredSubscribers = useMemo(() => {
+    return subscribers.filter((sub) => {
+      const q = search.trim().toLowerCase()
+      const dnn = sub.slice?.[0]?.session?.[0]?.name?.toLowerCase() ?? ''
+      const matchesSearch = !q || sub.imsi.includes(q) || dnn.includes(q)
+
+      if (!matchesSearch) return false
+
+      if (statusFilter === 'registered') {
+        return Boolean(sub.live_status?.registered)
+      }
+      if (statusFilter === 'offline') {
+        return !sub.live_status?.registered
+      }
+      return true
+    })
+  }, [subscribers, search, statusFilter])
+
+  const copyToClipboard = (text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopiedImsi(text)
+      setTimeout(() => setCopiedImsi(null), 2000)
+      toast.success(`IMSI ${text} copiado`)
+    })
+  }
+
+  const openEdit = (sub: Subscriber) => {
+    const sst = sub.slice?.[0]?.sst ?? 1
+    const sd = sub.slice?.[0]?.sd ?? '000001'
+    const apn_dnn = sub.slice?.[0]?.session?.[0]?.name ?? 'internet'
+    setEditSub(sub)
+    setEditForm({
+      key: '',
+      opc: '',
+      amf: sub.security?.amf ?? '8000',
+      apn_dnn,
+      sst,
+      sd,
+    })
+  }
+
   return (
     <EmsPage
-      title='Suscriptores'
-      description='Provisionamiento controlado sobre la MongoDB del Open5GS existente.'
+      title='Suscriptores y Perfiles SIM'
+      description='Gestión de identidades 5G/4G sobre la base de datos UDM/UDR con telemetría de registro NAS y sesiones PDU en vivo.'
+      actions={
+        <div className='flex items-center gap-2'>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => void query.refetch()}
+            disabled={query.isFetching}
+            className='gap-1.5'
+          >
+            <RefreshCw className={`size-3.5 ${query.isFetching ? 'animate-spin' : ''}`} />
+            Actualizar
+          </Button>
+          {isOperator && (
+            <Button
+              size='sm'
+              onClick={() => setCreateOpen(true)}
+              className='gap-1.5'
+            >
+              <Plus className='size-4' />
+              Aprovisionar Suscriptor
+            </Button>
+          )}
+        </div>
+      }
     >
-      <div className='grid gap-4 lg:grid-cols-[2fr_1fr]'>
-        <Card>
-          <CardContent className='pt-6'>
+      {/* STATS CARDS */}
+      <div className='grid gap-4 sm:grid-cols-3 mb-4'>
+        <Card className='p-4 flex items-center justify-between'>
+          <div>
+            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Total Suscriptores
+            </p>
+            <h3 className='text-2xl font-black font-mono mt-1'>
+              {subscribers.length}
+            </h3>
+            <p className='text-[11px] text-muted-foreground mt-0.5'>
+              Provisionados en MongoDB UDR
+            </p>
+          </div>
+          <div className='p-2.5 rounded-xl bg-primary/10 text-primary'>
+            <Users className='size-5' />
+          </div>
+        </Card>
+
+        <Card className='p-4 flex items-center justify-between'>
+          <div>
+            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Registrados en Vivo
+            </p>
+            <h3 className='text-2xl font-black font-mono mt-1 text-emerald-600 dark:text-emerald-400'>
+              {registeredCount}
+            </h3>
+            <p className='text-[11px] text-muted-foreground mt-0.5'>
+              Estado NAS 5G: RM-REGISTERED
+            </p>
+          </div>
+          <div className='p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600'>
+            <Activity className='size-5' />
+          </div>
+        </Card>
+
+        <Card className='p-4 flex items-center justify-between'>
+          <div>
+            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Sesiones PDU Activas
+            </p>
+            <h3 className='text-2xl font-black font-mono mt-1 text-sky-600 dark:text-sky-400'>
+              {pduSessionCount}
+            </h3>
+            <p className='text-[11px] text-muted-foreground mt-0.5'>
+              Plano de usuario UPF establecido
+            </p>
+          </div>
+          <div className='p-2.5 rounded-xl bg-sky-500/10 text-sky-600'>
+            <Globe className='size-5' />
+          </div>
+        </Card>
+      </div>
+
+      {/* FILTER AND TABLE CARD */}
+      <Card>
+        <CardHeader className='pb-3'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <div>
+              <CardTitle className='text-base font-semibold'>
+                Directorio de Suscriptores HSS / UDR
+              </CardTitle>
+              <CardDescription className='text-xs'>
+                Consulta de autenticación 5G-AKA / Milenage y estado del contexto de sesión.
+              </CardDescription>
+            </div>
+
+            <div className='flex flex-wrap items-center gap-2'>
+              <Input
+                placeholder='Buscar por IMSI o APN…'
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className='h-8 w-56 text-xs'
+              />
+              <div className='flex rounded-md border p-0.5 bg-muted/30 text-xs'>
+                <button
+                  type='button'
+                  onClick={() => setStatusFilter('all')}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    statusFilter === 'all'
+                      ? 'bg-background shadow-xs font-semibold text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Todos ({subscribers.length})
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setStatusFilter('registered')}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    statusFilter === 'registered'
+                      ? 'bg-background shadow-xs font-semibold text-emerald-600'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Registrados ({registeredCount})
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setStatusFilter('offline')}
+                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                    statusFilter === 'offline'
+                      ? 'bg-background shadow-xs font-semibold text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  Offline ({subscribers.length - registeredCount})
+                </button>
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className='p-0'>
+          <div className='border-t overflow-x-auto'>
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>IMSI</TableHead>
-                  <TableHead>S-NSSAI</TableHead>
-                  <TableHead>Clave enmascarada</TableHead>
+                <TableRow className='bg-muted/40 text-[11px] uppercase tracking-wider'>
+                  <TableHead className='font-semibold'>IMSI / Identidad</TableHead>
+                  <TableHead className='font-semibold'>Estado 3GPP (NAS)</TableHead>
+                  <TableHead className='font-semibold'>Sesión PDU / IP</TableHead>
+                  <TableHead className='font-semibold'>Slice (S-NSSAI)</TableHead>
+                  <TableHead className='font-semibold'>APN / DNN</TableHead>
+                  <TableHead className='font-semibold'>Seguridad (K / OPc)</TableHead>
+                  <TableHead className='text-right font-semibold'>Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {query.data?.map((x) => (
-                  <TableRow key={x.imsi}>
-                    <TableCell className='font-mono'>{x.imsi}</TableCell>
-                    <TableCell>SST {x.slice?.[0]?.sst}</TableCell>
-                    <TableCell className='font-mono text-xs'>
-                      {x.security.k}
+                {query.isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className='h-32 text-center text-xs text-muted-foreground'>
+                      Cargando suscriptores y consultando estado en vivo…
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : filteredSubscribers.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className='h-32 text-center text-xs text-muted-foreground'>
+                      {search ? 'Sin coincidencias para la búsqueda.' : 'No hay suscriptores aprovisionados.'}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredSubscribers.map((sub) => {
+                    const live = sub.live_status
+                    const slice = sub.slice?.[0]
+                    const dnn = slice?.session?.[0]?.name ?? 'internet'
+
+                    return (
+                      <TableRow key={sub.imsi} className='hover:bg-muted/30 text-xs'>
+                        <TableCell className='font-mono font-bold whitespace-nowrap'>
+                          <div className='flex items-center gap-1.5'>
+                            <span>{sub.imsi}</span>
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='size-6 text-muted-foreground hover:text-foreground'
+                              onClick={() => copyToClipboard(sub.imsi)}
+                              title='Copiar IMSI'
+                            >
+                              {copiedImsi === sub.imsi ? (
+                                <Check className='size-3 text-emerald-500' />
+                              ) : (
+                                <Copy className='size-3' />
+                              )}
+                            </Button>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className='whitespace-nowrap'>
+                          {live?.registered ? (
+                            <div className='flex flex-col gap-0.5'>
+                              <Badge className='w-fit bg-emerald-600 text-white text-[10px] font-mono gap-1'>
+                                <span className='size-1.5 rounded-full bg-white animate-ping' />
+                                RM-REGISTERED
+                              </Badge>
+                              <span className='text-[10px] font-mono text-muted-foreground'>
+                                {live.cm_state} {live.cell_id ? `· Cell ${live.cell_id}` : ''}
+                              </span>
+                            </div>
+                          ) : (
+                            <Badge variant='outline' className='text-[10px] text-muted-foreground font-mono'>
+                              DEREGISTERED
+                            </Badge>
+                          )}
+                        </TableCell>
+
+                        <TableCell className='whitespace-nowrap font-mono'>
+                          {live?.pdu_sessions?.length ? (
+                            <div className='flex flex-col gap-0.5'>
+                              <Badge variant='secondary' className='w-fit text-[10px] font-mono gap-1 text-sky-600 dark:text-sky-400'>
+                                <Wifi className='size-3' />
+                                {live.active_ip ?? 'PS-ACTIVE'}
+                              </Badge>
+                              <span className='text-[10px] text-muted-foreground'>
+                                {live.pdu_sessions[0].session_id} · {live.pdu_sessions[0].apn}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className='text-muted-foreground text-[11px]'>Sin sesión PDU</span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className='font-mono whitespace-nowrap text-xs'>
+                          <span className='font-semibold'>SST {slice?.sst ?? 1}</span>
+                          {slice?.sd && (
+                            <span className='text-muted-foreground ml-1'>
+                              / SD {slice.sd}
+                            </span>
+                          )}
+                        </TableCell>
+
+                        <TableCell className='font-mono text-xs whitespace-nowrap'>
+                          <span className='px-1.5 py-0.5 rounded bg-muted text-foreground'>
+                            {dnn}
+                          </span>
+                        </TableCell>
+
+                        <TableCell className='font-mono text-[11px] whitespace-nowrap text-muted-foreground'>
+                          <div className='flex items-center gap-1' title={`K: ${sub.security.k}`}>
+                            <Shield className='size-3 text-muted-foreground/60' />
+                            <span>K: {sub.security.k}</span>
+                          </div>
+                        </TableCell>
+
+                        <TableCell className='text-right whitespace-nowrap'>
+                          <div className='flex items-center justify-end gap-1'>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              className='h-7 gap-1 text-xs'
+                              onClick={() => setDetailSub(sub)}
+                              title='Ver detalles 3GPP y telemetría de sesión'
+                            >
+                              <Eye className='size-3.5' />
+                              Detalle
+                            </Button>
+                            {isOperator && (
+                              <>
+                                <Button
+                                  variant='ghost'
+                                  size='icon'
+                                  className='size-7'
+                                  onClick={() => openEdit(sub)}
+                                  title='Editar suscriptor'
+                                >
+                                  <Edit className='size-3.5' />
+                                </Button>
+                                <Button
+                                  variant='ghost'
+                                  size='icon'
+                                  className='size-7 text-destructive hover:bg-destructive/10'
+                                  onClick={() => setDeleteTarget(sub.imsi)}
+                                  title='Eliminar suscriptor'
+                                >
+                                  <Trash2 className='size-3.5' />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className='space-y-4 pt-6'>
-            <Field
-              label='IMSI'
-              value={form.imsi}
-              onChange={(v) => setForm({ ...form, imsi: v })}
-            />
-            <Field
-              label='K'
-              type='password'
-              value={form.key}
-              onChange={(v) => setForm({ ...form, key: v })}
-            />
-            <Field
-              label='OPc'
-              type='password'
-              value={form.opc}
-              onChange={(v) => setForm({ ...form, opc: v })}
-            />
-            <Field
-              label='APN / DNN'
-              value={form.apn_dnn}
-              onChange={(v) => setForm({ ...form, apn_dnn: v })}
-            />
-            {canOperate(role) ? (
-              <Button
-                className='w-full'
-                disabled={mutation.isPending}
-                onClick={() => mutation.mutate()}
-              >
-                Crear perfil SIM
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* MODAL DETALLES 3GPP */}
+      <Dialog open={Boolean(detailSub)} onOpenChange={(o) => !o && setDetailSub(null)}>
+        <DialogContent className='sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle className='flex items-center gap-2 text-base font-bold'>
+              <Radio className='size-4 text-primary' />
+              Detalles 3GPP · IMSI {detailSub?.imsi}
+            </DialogTitle>
+            <DialogDescription className='text-xs'>
+              Parámetros de contexto de movilidad (5GMM) y sesión de datos (5GSM).
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailSub && (
+            <div className='space-y-4 py-2 text-xs'>
+              {/* Status Banner */}
+              <div className={`p-3 rounded-lg border flex items-center justify-between ${
+                detailSub.live_status?.registered
+                  ? 'bg-emerald-500/10 border-emerald-500/30'
+                  : 'bg-muted/40 border-border'
+              }`}>
+                <div>
+                  <p className='font-semibold text-sm'>
+                    {detailSub.live_status?.registered ? 'Registrado en la Red 5G' : 'Desconectado / Idle'}
+                  </p>
+                  <p className='text-muted-foreground text-[11px] mt-0.5'>
+                    Estado NAS: {detailSub.live_status?.rm_state ?? 'RM-DEREGISTERED'} ({detailSub.live_status?.cm_state ?? 'CM-IDLE'})
+                  </p>
+                </div>
+                <Badge className={detailSub.live_status?.registered ? 'bg-emerald-600 text-white' : ''}>
+                  {detailSub.live_status?.registered ? 'EN LÍNEA' : 'OFFLINE'}
+                </Badge>
+              </div>
+
+              {/* Grid 3GPP */}
+              <div className='grid grid-cols-2 gap-3 rounded-lg border p-3 bg-muted/10 font-mono'>
+                <div>
+                  <span className='text-[10px] text-muted-foreground block uppercase'>GUTI / TMSI</span>
+                  <span className='font-semibold text-xs'>{detailSub.live_status?.guti || 'No asignado'}</span>
+                </div>
+                <div>
+                  <span className='text-[10px] text-muted-foreground block uppercase'>Celda Conectada (Cell ID)</span>
+                  <span className='font-semibold text-xs'>{detailSub.live_status?.cell_id ?? 'Ninguna'}</span>
+                </div>
+                <div>
+                  <span className='text-[10px] text-muted-foreground block uppercase'>Tracking Area Code (TAC)</span>
+                  <span className='font-semibold text-xs'>{detailSub.live_status?.tac ?? '—'}</span>
+                </div>
+                <div>
+                  <span className='text-[10px] text-muted-foreground block uppercase'>Estado MM</span>
+                  <span className='font-semibold text-xs'>{detailSub.live_status?.mm_state ?? '—'}</span>
+                </div>
+              </div>
+
+              {/* PDU Session Details */}
+              <div>
+                <h4 className='font-semibold mb-2 flex items-center gap-1.5'>
+                  <Globe className='size-3.5 text-sky-500' />
+                  Sesión de Plano de Usuario (PDU Session)
+                </h4>
+                {detailSub.live_status?.pdu_sessions?.length ? (
+                  detailSub.live_status.pdu_sessions.map((ps, idx) => (
+                    <div key={idx} className='rounded-lg border p-3 space-y-1.5 font-mono text-xs bg-muted/10'>
+                      <div className='flex justify-between font-bold'>
+                        <span>{ps.session_id || `Sesión ${idx + 1}`}</span>
+                        <Badge variant='outline' className='text-sky-600 dark:text-sky-400 font-semibold'>
+                          {ps.state || 'PS-ACTIVE'}
+                        </Badge>
+                      </div>
+                      <div className='grid grid-cols-2 gap-2 pt-1'>
+                        <div>
+                          <span className='text-[10px] text-muted-foreground block'>IP Asignada</span>
+                          <span className='font-bold text-sm text-foreground'>{ps.address || '10.45.0.2'}</span>
+                        </div>
+                        <div>
+                          <span className='text-[10px] text-muted-foreground block'>Tipo de Sesión</span>
+                          <span>{ps.type || 'IPv4'}</span>
+                        </div>
+                        <div>
+                          <span className='text-[10px] text-muted-foreground block'>APN / Data Network Name</span>
+                          <span>{ps.apn || 'internet'}</span>
+                        </div>
+                        <div>
+                          <span className='text-[10px] text-muted-foreground block'>Velocidad Máxima (AMBR)</span>
+                          <span>{ps.ambr || '1 Gbps'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className='text-xs text-muted-foreground p-3 rounded-lg border bg-muted/20'>
+                    El equipo de usuario no tiene túneles GTP-U ni sesiones PDU activas en este momento.
+                  </p>
+                )}
+              </div>
+
+              {/* Slice & Security */}
+              <div className='rounded-lg border p-3 space-y-2 bg-muted/10 text-xs'>
+                <h4 className='font-semibold'>Parámetros SIM y Slice</h4>
+                <div className='grid grid-cols-2 gap-2 font-mono'>
+                  <div>
+                    <span className='text-[10px] text-muted-foreground block'>Slice SST / SD</span>
+                    <span>SST: {detailSub.slice?.[0]?.sst ?? 1} / SD: {detailSub.slice?.[0]?.sd ?? '—'}</span>
+                  </div>
+                  <div>
+                    <span className='text-[10px] text-muted-foreground block'>Clave de Autenticación K</span>
+                    <span>{detailSub.security.k}</span>
+                  </div>
+                  <div>
+                    <span className='text-[10px] text-muted-foreground block'>Operador OPc</span>
+                    <span>{detailSub.security.opc}</span>
+                  </div>
+                  <div>
+                    <span className='text-[10px] text-muted-foreground block'>AMF Vector</span>
+                    <span>{detailSub.security.amf ?? '8000'}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setDetailSub(null)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL CREAR SUSCRIPTOR */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className='sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle className='text-base font-bold flex items-center gap-2'>
+              <UserPlus className='size-4 text-primary' />
+              Aprovisionar Nuevo Suscriptor SIM
+            </DialogTitle>
+            <DialogDescription className='text-xs'>
+              Registra un nuevo IMSI en MongoDB para permitir su registro en el Core 5G SA / 4G EPC.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              createMutation.mutate(createForm)
+            }}
+            className='space-y-3 py-2 text-xs'
+          >
+            <div>
+              <Label className='text-xs font-semibold'>IMSI (14 o 15 dígitos)</Label>
+              <Input
+                value={createForm.imsi}
+                onChange={(e) => setCreateForm({ ...createForm, imsi: e.target.value })}
+                placeholder='999700000000002'
+                className='h-8 font-mono text-xs mt-1'
+                required
+              />
+            </div>
+
+            <div className='grid grid-cols-2 gap-3'>
+              <div>
+                <Label className='text-xs font-semibold'>Clave K (32 hex)</Label>
+                <Input
+                  value={createForm.key}
+                  onChange={(e) => setCreateForm({ ...createForm, key: e.target.value.toUpperCase() })}
+                  className='h-8 font-mono text-xs mt-1'
+                  required
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>OPc (32 hex)</Label>
+                <Input
+                  value={createForm.opc}
+                  onChange={(e) => setCreateForm({ ...createForm, opc: e.target.value.toUpperCase() })}
+                  className='h-8 font-mono text-xs mt-1'
+                  required
+                />
+              </div>
+            </div>
+
+            <div className='grid grid-cols-3 gap-2'>
+              <div>
+                <Label className='text-xs font-semibold'>APN / DNN</Label>
+                <Input
+                  value={createForm.apn_dnn}
+                  onChange={(e) => setCreateForm({ ...createForm, apn_dnn: e.target.value })}
+                  placeholder='internet'
+                  className='h-8 font-mono text-xs mt-1'
+                  required
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>SST (Slice)</Label>
+                <Input
+                  type='number'
+                  value={createForm.sst}
+                  onChange={(e) => setCreateForm({ ...createForm, sst: Number(e.target.value) })}
+                  className='h-8 font-mono text-xs mt-1'
+                  min={1}
+                  max={255}
+                  required
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>SD (Slice Differentiator)</Label>
+                <Input
+                  value={createForm.sd}
+                  onChange={(e) => setCreateForm({ ...createForm, sd: e.target.value.toUpperCase() })}
+                  placeholder='000001'
+                  className='h-8 font-mono text-xs mt-1'
+                />
+              </div>
+            </div>
+
+            <DialogFooter className='pt-3'>
+              <Button type='button' variant='outline' onClick={() => setCreateOpen(false)}>
+                Cancelar
               </Button>
-            ) : (
-              <p className='text-sm text-muted-foreground'>
-                Vista de solo lectura para alumnos.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </EmsPage>
-  )
-}
-function Field({
-  label,
-  value,
-  onChange,
-  type = 'text',
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  type?: string
-}) {
-  return (
-    <div className='space-y-2'>
-      <Label>{label}</Label>
-      <Input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+              <Button type='submit' disabled={createMutation.isPending}>
+                {createMutation.isPending ? 'Aprovisionando…' : 'Crear Suscriptor'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL EDITAR SUSCRIPTOR */}
+      <Dialog open={Boolean(editSub)} onOpenChange={(o) => !o && setEditSub(null)}>
+        <DialogContent className='sm:max-w-lg'>
+          <DialogHeader>
+            <DialogTitle className='text-base font-bold flex items-center gap-2'>
+              <Edit className='size-4 text-primary' />
+              Editar Suscriptor · IMSI {editSub?.imsi}
+            </DialogTitle>
+            <DialogDescription className='text-xs'>
+              Modifica los parámetros de slice, sesión de datos o actualiza las credenciales de cifrado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!editSub) return
+              const payload: Record<string, unknown> = {
+                apn_dnn: editForm.apn_dnn,
+                sst: editForm.sst,
+                sd: editForm.sd,
+                amf: editForm.amf,
+              }
+              if (editForm.key.trim().length === 32) {
+                payload.key = editForm.key.trim().toUpperCase()
+              }
+              if (editForm.opc.trim().length === 32) {
+                payload.opc = editForm.opc.trim().toUpperCase()
+              }
+              updateMutation.mutate({ imsi: editSub.imsi, payload })
+            }}
+            className='space-y-3 py-2 text-xs'
+          >
+            <div className='grid grid-cols-2 gap-3'>
+              <div>
+                <Label className='text-xs font-semibold'>Nueva Clave K (Opcional, 32 hex)</Label>
+                <Input
+                  value={editForm.key}
+                  onChange={(e) => setEditForm({ ...editForm, key: e.target.value.toUpperCase() })}
+                  placeholder='Dejar en blanco para mantener'
+                  className='h-8 font-mono text-xs mt-1'
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>Nuevo OPc (Opcional, 32 hex)</Label>
+                <Input
+                  value={editForm.opc}
+                  onChange={(e) => setEditForm({ ...editForm, opc: e.target.value.toUpperCase() })}
+                  placeholder='Dejar en blanco para mantener'
+                  className='h-8 font-mono text-xs mt-1'
+                />
+              </div>
+            </div>
+
+            <div className='grid grid-cols-3 gap-2'>
+              <div>
+                <Label className='text-xs font-semibold'>APN / DNN</Label>
+                <Input
+                  value={editForm.apn_dnn}
+                  onChange={(e) => setEditForm({ ...editForm, apn_dnn: e.target.value })}
+                  className='h-8 font-mono text-xs mt-1'
+                  required
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>SST (Slice)</Label>
+                <Input
+                  type='number'
+                  value={editForm.sst}
+                  onChange={(e) => setEditForm({ ...editForm, sst: Number(e.target.value) })}
+                  className='h-8 font-mono text-xs mt-1'
+                  min={1}
+                  max={255}
+                  required
+                />
+              </div>
+              <div>
+                <Label className='text-xs font-semibold'>SD (Slice Diff)</Label>
+                <Input
+                  value={editForm.sd}
+                  onChange={(e) => setEditForm({ ...editForm, sd: e.target.value.toUpperCase() })}
+                  className='h-8 font-mono text-xs mt-1'
+                />
+              </div>
+            </div>
+
+            <DialogFooter className='pt-3'>
+              <Button type='button' variant='outline' onClick={() => setEditSub(null)}>
+                Cancelar
+              </Button>
+              <Button type='submit' disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? 'Guardando…' : 'Guardar Cambios'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* CONFIRMAR ELIMINACIÓN */}
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Eliminar Suscriptor ${deleteTarget}`}
+        desc='Esta acción eliminará el perfil SIM de la base de datos Open5GS UDR permanentemente. El equipo ya no podrá registrarse.'
+        confirmText='Eliminar Suscriptor'
+        destructive
+        isLoading={deleteMutation.isPending}
+        handleConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
       />
-    </div>
+    </EmsPage>
   )
 }

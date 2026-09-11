@@ -27,70 +27,76 @@ export type TopologySelection =
   | { type: 'host'; id: string }
   | { type: 'component'; id: string }
 
+export type NodeAlarmItem = {
+  component?: string
+  node_id?: string
+  severity?: string
+}
+
 // Layout arquitectural 3GPP compacto y balanceado
 const telcoPositions5G: Record<string, { x: number; y: number }> = {
   // Fila 1: Microservicios Core (Auth a la izquierda, Políticas a la derecha)
-  mongodb: { x: 60,  y: 40 },
-  udr:     { x: 230, y: 40 },
-  udm:     { x: 400, y: 40 },
-  ausf:    { x: 570, y: 40 },
+  mongodb: { x: 60, y: 40 },
+  udr: { x: 230, y: 40 },
+  udm: { x: 400, y: 40 },
+  ausf: { x: 570, y: 40 },
 
-  pcf:     { x: 740, y: 40 },
-  nssf:    { x: 910, y: 40 },
-  nrf:     { x: 1080, y: 40 },
-  scp:     { x: 1250, y: 40 },
+  pcf: { x: 740, y: 40 },
+  nssf: { x: 910, y: 40 },
+  nrf: { x: 1080, y: 40 },
+  scp: { x: 1250, y: 40 },
 
   // Fila 2: Plano de Control (AMF sobre gNodeB, SMF sobre UPF)
-  amf:     { x: 400, y: 220 },
-  smf:     { x: 740, y: 220 },
+  amf: { x: 400, y: 220 },
+  smf: { x: 740, y: 220 },
 
   // Fila 3: Plano de Usuario (Izquierda a Derecha: UE -> gNodeB -> UPF)
-  ue:      { x: 60,  y: 390 },
-  gnb:     { x: 400, y: 390 },
-  upf:     { x: 740, y: 390 },
+  ue: { x: 60, y: 390 },
+  gnb: { x: 400, y: 390 },
+  upf: { x: 740, y: 390 },
 }
 
 const telcoPositions4G: Record<string, { x: number; y: number }> = {
-  mongodb: { x: 60,  y: 40 },
-  hss:     { x: 380, y: 40 },
-  pcrf:    { x: 720, y: 40 },
+  mongodb: { x: 60, y: 40 },
+  hss: { x: 380, y: 40 },
+  pcrf: { x: 720, y: 40 },
 
-  mme:     { x: 380, y: 210 },
-  sgwc:    { x: 720, y: 210 },
-  smf:     { x: 1040, y: 210 },
+  mme: { x: 380, y: 210 },
+  sgwc: { x: 720, y: 210 },
+  smf: { x: 1040, y: 210 },
 
-  ue:      { x: 60,  y: 380 },
-  enb:     { x: 380, y: 380 },
-  sgwu:    { x: 720, y: 380 },
-  upf:     { x: 1040, y: 380 },
+  ue: { x: 60, y: 380 },
+  enb: { x: 380, y: 380 },
+  sgwu: { x: 720, y: 380 },
+  upf: { x: 1040, y: 380 },
 }
 
 // Mapeo unívoco y sobrio de interfaces 3GPP
 const specificTelcoEdges: Record<string, { label: string; stroke: string }> = {
   // 5G SA
-  'ue-gnb':      { label: 'NR-Uu (Radio)', stroke: 'solid' },
-  'gnb-amf':     { label: 'N2 (NGAP)', stroke: 'solid' },
-  'gnb-upf':     { label: 'N3 (GTP-U)', stroke: 'solid' },
-  'amf-smf':     { label: 'N11 (SBI)', stroke: 'dashed' },
-  'smf-upf':     { label: 'N4 (PFCP)', stroke: 'solid' },
+  'ue-gnb': { label: 'NR-Uu (Radio)', stroke: 'solid' },
+  'gnb-amf': { label: 'N2 (NGAP)', stroke: 'solid' },
+  'gnb-upf': { label: 'N3 (GTP-U)', stroke: 'solid' },
+  'amf-smf': { label: 'N11 (SBI)', stroke: 'dashed' },
+  'smf-upf': { label: 'N4 (PFCP)', stroke: 'solid' },
   'mongodb-udr': { label: 'BSON', stroke: 'dashed' },
-  'udr-udm':     { label: 'Nudr', stroke: 'dashed' },
-  'udm-ausf':    { label: 'Nausf', stroke: 'dashed' },
-  'ausf-amf':    { label: 'Namf / N12', stroke: 'dashed' },
-  'pcf-smf':     { label: 'Npcf', stroke: 'dashed' },
-  'nssf-amf':    { label: 'Nnssf', stroke: 'dashed' },
-  'nrf-scp':     { label: 'SBI', stroke: 'dashed' },
+  'udr-udm': { label: 'Nudr', stroke: 'dashed' },
+  'udm-ausf': { label: 'Nausf', stroke: 'dashed' },
+  'ausf-amf': { label: 'Namf / N12', stroke: 'dashed' },
+  'pcf-smf': { label: 'Npcf', stroke: 'dashed' },
+  'nssf-amf': { label: 'Nnssf', stroke: 'dashed' },
+  'nrf-scp': { label: 'SBI', stroke: 'dashed' },
 
   // 4G EPC
-  'ue-enb':      { label: 'LTE-Uu', stroke: 'solid' },
-  'enb-mme':     { label: 'S1-MME', stroke: 'solid' },
-  'enb-sgwu':    { label: 'S1-U (GTP-U)', stroke: 'solid' },
-  'hss-mme':     { label: 'S6a', stroke: 'solid' },
-  'mme-sgwc':    { label: 'S11', stroke: 'solid' },
-  'sgwc-sgwu':   { label: 'S5/S8 Control', stroke: 'solid' },
-  'sgwc-smf':    { label: 'S5/S8-C', stroke: 'solid' },
-  'sgwu-upf':    { label: 'S5/S8-U', stroke: 'solid' },
-  'pcrf-smf':    { label: 'Gx', stroke: 'solid' },
+  'ue-enb': { label: 'LTE-Uu', stroke: 'solid' },
+  'enb-mme': { label: 'S1-MME', stroke: 'solid' },
+  'enb-sgwu': { label: 'S1-U (GTP-U)', stroke: 'solid' },
+  'hss-mme': { label: 'S6a', stroke: 'solid' },
+  'mme-sgwc': { label: 'S11', stroke: 'solid' },
+  'sgwc-sgwu': { label: 'S5/S8 Control', stroke: 'solid' },
+  'sgwc-smf': { label: 'S5/S8-C', stroke: 'solid' },
+  'sgwu-upf': { label: 'S5/S8-U', stroke: 'solid' },
+  'pcrf-smf': { label: 'Gx', stroke: 'solid' },
   'mongodb-hss': { label: 'BSON', stroke: 'dashed' },
 }
 
@@ -116,29 +122,67 @@ function TelcoNode({ data }: NodeProps) {
   const id = String(data.id ?? data.label).toLowerCase()
   const kind = String(data.kind ?? '')
   const icon = getComponentIcon(id)
+  const alarmSeverity = data.alarmSeverity as string | undefined
+  const alarmCount = Number(data.alarmCount ?? 0)
+
+  let containerStyle =
+    'bg-card border-border hover:border-primary text-card-foreground hover:shadow-md'
+  let ledStyle = 'bg-emerald-500 shadow-[0_0_6px_#10b981]'
+
+  if (!isRunning) {
+    containerStyle =
+      'bg-destructive/10 border-destructive text-destructive shadow-lg animate-pulse'
+    ledStyle = 'bg-red-500 shadow-[0_0_8px_#ef4444]'
+  } else if (alarmSeverity === 'critical') {
+    containerStyle =
+      'bg-destructive/10 border-red-500 ring-2 ring-red-500/40 text-card-foreground shadow-md'
+    ledStyle = 'bg-red-500 shadow-[0_0_8px_#ef4444] animate-ping'
+  } else if (alarmSeverity === 'major') {
+    containerStyle =
+      'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/30 text-card-foreground shadow-md'
+    ledStyle = 'bg-amber-500 shadow-[0_0_8px_#f59e0b]'
+  } else if (alarmSeverity === 'minor' || alarmSeverity === 'warning') {
+    containerStyle =
+      'bg-yellow-500/5 border-yellow-500/80 text-card-foreground shadow-sm'
+    ledStyle = 'bg-yellow-500 shadow-[0_0_6px_#eab308]'
+  }
 
   return (
     <div
-      className={`relative flex flex-col items-center justify-center rounded-2xl border-2 px-5 py-3.5 transition-all duration-200 select-none shadow-sm ${
-        isRunning
-          ? 'bg-card border-border hover:border-primary text-card-foreground hover:shadow-md'
-          : 'bg-destructive/10 border-destructive text-destructive shadow-lg animate-pulse'
-      }`}
+      className={`relative flex flex-col items-center justify-center rounded-2xl border-2 px-5 py-3.5 transition-all duration-200 select-none shadow-sm ${containerStyle}`}
       style={{ minWidth: 140, minHeight: 74 }}
     >
       {/* Handles para conexiones limpias */}
       {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap((position) =>
         (['source', 'target'] as const).map((type) => (
-          <Handle key={`${type}-${position}`} id={`${type}-${position}`} type={type} position={position} className='!w-2.5 !h-2.5 !bg-primary/50 !border-card' />
+          <Handle
+            key={`${type}-${position}`}
+            id={`${type}-${position}`}
+            type={type}
+            position={position}
+            className='!w-2.5 !h-2.5 !bg-primary/50 !border-card'
+          />
         ))
       )}
 
       {/* Status LED */}
-      <span
-        className={`absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full ${
-          isRunning ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]' : 'bg-red-500 shadow-[0_0_8px_#ef4444]'
-        }`}
-      />
+      <span className={`absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full ${ledStyle}`} />
+
+      {/* Badge de alarma activa si está corriendo pero con incidente telco */}
+      {isRunning && alarmSeverity && alarmCount > 0 && (
+        <span
+          className={`absolute -top-2.5 -left-1.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider uppercase shadow-md border ${
+            alarmSeverity === 'critical'
+              ? 'bg-red-600 text-white border-red-700 animate-pulse'
+              : alarmSeverity === 'major'
+                ? 'bg-amber-500 text-white border-amber-600'
+                : 'bg-yellow-500 text-black border-yellow-600'
+          }`}
+        >
+          <span className='size-1.5 rounded-full bg-white animate-ping' />
+          {alarmSeverity} {alarmCount > 1 ? `(${alarmCount})` : ''}
+        </span>
+      )}
 
       {/* Icono temático del nodo (Celular para UE, Antena para gNodeB, etc.) */}
       {icon}
@@ -160,13 +204,36 @@ const nodeTypes = {
   telcoNode: TelcoNode,
 }
 
-function telcoElements(components: ComponentStatus[]) {
+function telcoElements(
+  components: ComponentStatus[],
+  alarms?: NodeAlarmItem[]
+) {
   const is5g = components.some((c) => c.id === 'amf' || c.id === 'gnb')
   const posMap = is5g ? telcoPositions5G : telcoPositions4G
 
   const nodes: Node[] = components.map((component, idx) => {
     const defaultPos = { x: 50 + (idx % 4) * 200, y: Math.floor(idx / 4) * 120 }
     const pos = posMap[component.id] ?? defaultPos
+
+    const compAlarms = (alarms ?? []).filter(
+      (a) =>
+        a.component === component.id ||
+        a.component?.toLowerCase() === component.id.toLowerCase() ||
+        (a.node_id && a.node_id === component.node_id)
+    )
+    const hasCritical = compAlarms.some((a) => a.severity === 'critical')
+    const hasMajor = compAlarms.some((a) => a.severity === 'major')
+    const hasMinor = compAlarms.some((a) => a.severity === 'minor')
+    const hasWarning = compAlarms.some((a) => a.severity === 'warning')
+    const highestSeverity = hasCritical
+      ? 'critical'
+      : hasMajor
+        ? 'major'
+        : hasMinor
+          ? 'minor'
+          : hasWarning
+            ? 'warning'
+            : null
 
     return {
       id: component.id,
@@ -178,6 +245,8 @@ function telcoElements(components: ComponentStatus[]) {
         label: component.label,
         kind: component.kind,
         status: component.status,
+        alarmSeverity: highestSeverity,
+        alarmCount: compAlarms.length,
       },
     }
   })
@@ -299,11 +368,13 @@ function physicalElements(
 export function EmsTopology({
   components,
   runtime,
+  alarms,
   view = 'telco',
   onSelect,
 }: {
   components: ComponentStatus[]
   runtime?: RuntimeSnapshot
+  alarms?: NodeAlarmItem[]
   view?: TopologyView
   onSelect?: (selection: TopologySelection) => void
 }) {
@@ -314,7 +385,7 @@ export function EmsTopology({
     const next =
       view === 'physical'
         ? physicalElements(components, runtime)
-        : telcoElements(components)
+        : telcoElements(components, alarms)
     setNodes((current) => {
       const positions = new Map(current.map((node) => [node.id, node.position]))
       return next.nodes.map((node) => ({
@@ -323,7 +394,7 @@ export function EmsTopology({
       }))
     })
     setEdges(next.edges)
-  }, [components, runtime, setEdges, setNodes, view])
+  }, [components, runtime, alarms, setEdges, setNodes, view])
 
   const handleNodeClick: NodeMouseHandler = (_, node) => {
     const type = node.data.selectionType === 'host' ? 'host' : 'component'

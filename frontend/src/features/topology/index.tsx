@@ -1,5 +1,12 @@
 import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  AlertTriangle,
+  Radio,
+  ShieldAlert,
+  Terminal,
+} from 'lucide-react'
 import { api, canOperate, type RuntimeSnapshot, type ScenarioStatus } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -49,6 +56,25 @@ export function TopologyPage() {
     queryFn: async () =>
       (await api.get<RuntimeSnapshot>(`/runtime/${scenario}`)).data,
     refetchInterval: 5000,
+  })
+  const alarmCenter = useQuery({
+    queryKey: ['alarm-center', scenario],
+    queryFn: async () =>
+      (
+        await api.get<{
+          items: {
+            id: string
+            component: string
+            node_id?: string
+            network_function: string
+            severity: string
+            message: string
+            evidence?: string
+            first_seen: number
+          }[]
+        }>(`/alarm-center/${scenario}`)
+      ).data,
+    refetchInterval: 4000,
   })
   const component =
     selection?.type === 'component'
@@ -114,6 +140,7 @@ export function TopologyPage() {
           <EmsTopology
             components={status.data?.components ?? []}
             runtime={runtime.data}
+            alarms={alarmCenter.data?.items ?? []}
             view={view}
             onSelect={setSelection}
           />
@@ -133,6 +160,77 @@ export function TopologyPage() {
                 </div>
                 <SheetDescription>{component.unit} · nodo {component.node_id}</SheetDescription>
               </SheetHeader>
+
+              {(() => {
+                const componentAlarms = (alarmCenter.data?.items ?? []).filter(
+                  (a) =>
+                    a.component === component.id ||
+                    a.component?.toLowerCase() === component.id.toLowerCase() ||
+                    (a.node_id && a.node_id === component.node_id)
+                )
+                return (
+                  <>
+                    {componentAlarms.length > 0 && (
+                      <div className='mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs'>
+                        <div className='flex items-center justify-between'>
+                          <div className='flex items-center gap-1.5 font-semibold text-destructive'>
+                            <AlertTriangle className='size-3.5' />
+                            <span>Incidentes Telco Activos ({componentAlarms.length})</span>
+                          </div>
+                          <Link to={'/alarms' as any} search={{ component: component.id } as any}>
+                            <Button variant='ghost' size='sm' className='h-6 px-1.5 text-[11px] text-destructive'>
+                              Ver en Alarmas
+                            </Button>
+                          </Link>
+                        </div>
+                        <div className='mt-2 space-y-1.5'>
+                          {componentAlarms.map((alm) => (
+                            <div key={alm.id} className='flex items-start justify-between gap-2 rounded border bg-background/90 p-2 text-xs'>
+                              <div>
+                                <p className='font-medium'>{alm.message}</p>
+                                {alm.evidence && <p className='text-[10px] font-mono text-muted-foreground'>{alm.evidence}</p>}
+                              </div>
+                              <Badge
+                                variant={alm.severity === 'critical' ? 'destructive' : 'secondary'}
+                                className={`text-[9px] uppercase font-mono ${alm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
+                              >
+                                {alm.severity}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className='mx-4 mt-3 rounded-lg border bg-muted/20 p-3'>
+                      <h4 className='text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2'>
+                        Acciones del Operador (FCAPS)
+                      </h4>
+                      <div className='flex flex-wrap gap-2'>
+                        <Link to={'/commands' as any} search={{ component: component.id } as any}>
+                          <Button variant='outline' size='sm' className='h-7 gap-1.5 text-xs'>
+                            <Terminal className='size-3 text-primary' />
+                            Consola MML ({component.id.toUpperCase()})
+                          </Button>
+                        </Link>
+                        <Link to='/traces'>
+                          <Button variant='outline' size='sm' className='h-7 gap-1.5 text-xs'>
+                            <Radio className='size-3 text-sky-500' />
+                            Capturar Traza PCAP
+                          </Button>
+                        </Link>
+                        <Link to={'/alarms' as any} search={{ component: component.id } as any}>
+                          <Button variant='outline' size='sm' className='h-7 gap-1.5 text-xs'>
+                            <ShieldAlert className='size-3 text-amber-500' />
+                            Centro de Alarmas
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
+
               <ScrollArea className='min-h-0 flex-1 px-4'>
                 <Detail title='Interfaces' values={component.interfaces} />
                 <Detail title='Procedimientos relacionados' values={component.procedures} />
