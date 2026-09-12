@@ -15,9 +15,9 @@ export const sidebarData: SidebarData = {
   user: {
     name: 'Usuario EMS',
     email: 'PUCP · TEL142',
-    avatar: '/images/ems-logo.png',
+    avatar: '/images/ems-network.svg',
   },
-  teams: [{ name: 'EMS Educativo', logo: '/images/ems-logo.png', plan: 'Open5GS · srsRAN' }],
+  teams: [{ name: 'EMS Educativo', logo: '/images/ems-network.svg', plan: 'Open5GS · srsRAN' }],
   navGroups: [
     {
       title: 'Operación',

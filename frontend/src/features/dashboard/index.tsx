@@ -1,15 +1,7 @@
 import { useState } from 'react'
-import { Link } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import {
-  Activity,
-  AlertTriangle,
-  Network,
-  Radio,
-  RotateCcw,
-  Server,
-  Zap,
-} from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { Activity, Network, Radio, Server } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   api,
@@ -20,7 +12,13 @@ import {
 } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -28,11 +26,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Header } from '@/components/layout/header'
+import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Main } from '@/components/layout/main'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
 import { EmsTopology } from '@/features/topology/ems-topology'
 
 export function Dashboard() {
@@ -100,10 +95,13 @@ export function Dashboard() {
     const isInjected = exp.state?.status === 'injected'
     const action = isInjected ? 'recover' : 'inject'
     try {
-      const resp = await api.post(`/experiments/${exp.id}/${action}?scenario_id=${scenario}`)
+      const resp = await api.post(
+        `/experiments/${exp.id}/${action}?scenario_id=${scenario}`
+      )
       if (action === 'inject') {
         toast.error(`Falla inyectada: ${exp.title}`, {
-          description: resp.data.state?.message || 'Condición de falla activada.',
+          description:
+            resp.data.state?.message || 'Condición de falla activada.',
         })
       } else {
         toast.success(`Servicio restablecido: ${exp.title}`, {
@@ -130,51 +128,38 @@ export function Dashboard() {
   const total = status.data?.components.length ?? 0
 
   const ogstunTraffic = metrics.data?.interfaces?.ogstun
-  const totalUserPlaneKbps = (ogstunTraffic?.rx_kbps ?? 0) + (ogstunTraffic?.tx_kbps ?? 0)
+  const totalUserPlaneKbps =
+    (ogstunTraffic?.rx_kbps ?? 0) + (ogstunTraffic?.tx_kbps ?? 0)
 
   return (
-    <>
-      <Header fixed>
-        <Search />
-        <div className='ms-auto flex items-center gap-3'>
-          <ThemeSwitch />
-          <ProfileDropdown />
+    <Main className='overflow-y-auto pb-10'>
+      <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
+        <div className='flex flex-wrap items-center gap-2.5'>
+          <SidebarTrigger variant='outline' className='size-8 md:hidden' />
+          <h1 className='text-xl font-semibold tracking-tight'>Resumen</h1>
+          <div className='hidden h-4 w-px bg-border sm:block' />
+          <Select
+            value={scenario}
+            onValueChange={(val) => setScenario(val as '5g-sa' | '4g-epc')}
+          >
+            <SelectTrigger className='h-8 w-40 text-xs font-medium'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='5g-sa'>5G Standalone</SelectItem>
+              <SelectItem value='4g-epc'>4G EPC</SelectItem>
+            </SelectContent>
+          </Select>
+          <Badge
+            variant={
+              status.data?.state === 'running' ? 'default' : 'destructive'
+            }
+            className='px-2.5 py-1 text-xs font-medium tracking-wide uppercase'
+          >
+            ● {status.data?.state ?? 'conectando'}
+          </Badge>
         </div>
-      </Header>
-      <Main className='overflow-y-auto pb-10'>
-        <div className='mb-6 flex flex-wrap items-end justify-between gap-4'>
-          <div>
-            <p className='text-xs font-semibold tracking-[.18em] text-primary uppercase'>
-              EMS EDUCATIVO · {scenario === '5g-sa' ? '5G STANDALONE' : '4G EPC'}
-            </p>
-            <h1 className='text-3xl font-bold tracking-tight'>
-              Centro de operación y telemetría
-            </h1>
-            <p className='text-muted-foreground'>
-              Supervisión en tiempo real de funciones de red, sesiones de usuario y recursos del testbed.
-            </p>
-          </div>
-          <div className='flex items-center gap-2'>
-            <Select
-              value={scenario}
-              onValueChange={(val) => setScenario(val as '5g-sa' | '4g-epc')}
-            >
-              <SelectTrigger className='h-8 w-44 text-xs font-medium'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-                <SelectItem value='4g-epc'>4G EPC</SelectItem>
-              </SelectContent>
-            </Select>
-            <Badge
-              variant={status.data?.state === 'running' ? 'default' : 'destructive'}
-              className='px-3 py-1 text-xs font-medium tracking-wide uppercase'
-            >
-              ● {status.data?.state ?? 'conectando'}
-            </Badge>
-          </div>
-        </div>
+      </div>
 
         {/* METRICS ROW */}
         <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
@@ -205,22 +190,28 @@ export function Dashboard() {
         </div>
 
         {/* TOPOLOGY & LIVE TELEMETRY / ALARMS */}
-        <div className='mt-4 grid min-h-0 flex-1 gap-4 lg:grid-cols-[2fr_1fr]'>
-          <Card className='flex flex-col min-h-[470px]'>
+        <div className='mt-4 grid min-h-0 gap-4 lg:h-[480px] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'>
+          <Card className='flex h-[480px] min-h-0 min-w-0 flex-col lg:h-full'>
             <CardHeader className='pb-2'>
               <div className='flex items-center justify-between'>
                 <CardTitle>Topología en vivo</CardTitle>
                 <div className='flex items-center gap-2'>
-                  <Badge variant='outline' className='text-xs font-mono text-muted-foreground'>
+                  <Badge
+                    variant='outline'
+                    className='font-mono text-xs text-muted-foreground'
+                  >
                     Host: {runtime.data?.hostname ?? 'ems-testbed'}
                   </Badge>
-                  <Badge variant='outline' className='text-xs font-mono text-muted-foreground'>
+                  <Badge
+                    variant='outline'
+                    className='font-mono text-xs text-muted-foreground'
+                  >
                     Origen: {metrics.data?.source ?? 'ssh'}
                   </Badge>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className='flex-1 h-[340px]'>
+            <CardContent className='min-h-0 flex-1'>
               <EmsTopology
                 components={status.data?.components ?? []}
                 alarms={alarmCenter.data?.items ?? []}
@@ -228,12 +219,16 @@ export function Dashboard() {
             </CardContent>
           </Card>
 
-          <div className='space-y-4'>
+          <div className='grid min-h-0 min-w-0 gap-4 lg:h-full lg:grid-rows-2'>
             {/* Live Throughput Sparkline */}
-            <Card>
+            <Card className='min-h-0 overflow-auto'>
               <CardHeader className='pb-2'>
-                <CardTitle className='text-sm font-medium'>Telemetría de Tráfico en Vivo</CardTitle>
-                <CardDescription>Rendimiento por interfaz telco en tiempo real</CardDescription>
+                <CardTitle className='text-sm font-medium'>
+                  Telemetría de Tráfico en Vivo
+                </CardTitle>
+                <CardDescription>
+                  Rendimiento por interfaz telco en tiempo real
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ThroughputChart history={metrics.data?.history} />
@@ -241,12 +236,17 @@ export function Dashboard() {
             </Card>
 
             {/* Alarms Panel */}
-            <Card className='max-h-[260px] overflow-auto'>
+            <Card className='flex min-h-0 flex-col overflow-hidden'>
               <CardHeader className='pb-2'>
                 <div className='flex items-center justify-between'>
                   <div className='flex items-center gap-2'>
-                    <CardTitle className='text-sm font-medium'>Alarmas Telco Activas</CardTitle>
-                    <Link to='/alarms' className='text-[11px] text-primary hover:underline'>
+                    <CardTitle className='text-sm font-medium'>
+                      Alarmas Telco Activas
+                    </CardTitle>
+                    <Link
+                      to='/alarms'
+                      className='text-[11px] text-primary hover:underline'
+                    >
                       Ver todas →
                     </Link>
                   </div>
@@ -261,26 +261,41 @@ export function Dashboard() {
                         {alarmCenter.data.counts.major} MAJ
                       </span>
                     ) : null}
-                    <Badge variant={alarmCenter.data?.total ? 'destructive' : 'secondary'}>
+                    <Badge
+                      variant={
+                        alarmCenter.data?.total ? 'destructive' : 'secondary'
+                      }
+                    >
                       {alarmCenter.data?.total ?? 0}
                     </Badge>
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className='space-y-2'>
+              <CardContent className='min-h-0 flex-1 space-y-2 overflow-y-auto'>
                 {alarmCenter.data?.items?.length ? (
                   alarmCenter.data.items.map((alarm) => (
-                    <div key={alarm.id} className='rounded-lg border p-2.5 text-xs'>
+                    <div
+                      key={alarm.id}
+                      className='rounded-lg border p-2.5 text-xs'
+                    >
                       <div className='flex items-center justify-between'>
-                        <b className='font-semibold'>{alarm.network_function || alarm.component}</b>
+                        <b className='font-semibold'>
+                          {alarm.network_function || alarm.component}
+                        </b>
                         <Badge
-                          variant={alarm.severity === 'critical' ? 'destructive' : 'secondary'}
-                          className={`text-[9px] uppercase font-mono ${alarm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
+                          variant={
+                            alarm.severity === 'critical'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                          className={`font-mono text-[9px] uppercase ${alarm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
                         >
                           {alarm.severity}
                         </Badge>
                       </div>
-                      <p className='mt-1 text-muted-foreground'>{alarm.message}</p>
+                      <p className='mt-1 text-muted-foreground'>
+                        {alarm.message}
+                      </p>
                       {alarm.evidence && (
                         <p className='mt-0.5 font-mono text-[10px] text-muted-foreground/80'>
                           {alarm.evidence}
@@ -303,110 +318,106 @@ export function Dashboard() {
           </div>
         </div>
 
-        {/* FAULT INJECTION ENGINE SECTION */}
-        <Card className='mt-6'>
-          <CardHeader className='pb-3'>
-            <div className='flex flex-wrap items-center justify-between gap-2'>
-              <div>
-                <CardTitle className='flex items-center gap-2 text-base'>
-                  <AlertTriangle className='h-5 w-5 text-amber-500' />
-                  Laboratorio de Inyección de Fallas Reversibles (Evaluación de Resiliencia)
-                </CardTitle>
-                <CardDescription>
-                  Permite simular eventos críticos de red de forma controlada y medir el tiempo de detección y recuperación del EMS.
-                </CardDescription>
-              </div>
-              <Badge variant='outline' className='text-xs font-mono'>
-                Casos E1-E4 / Fallas 5G
-              </Badge>
-            </div>
+        <Card className='mt-4 gap-0 overflow-hidden py-0 shadow-none'>
+          <CardHeader className='border-b px-4 py-3'>
+            <CardTitle className='text-sm font-semibold'>
+              Laboratorio de fallas
+            </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-              {experiments.data?.map((exp) => {
-                const isInjected = exp.state?.status === 'injected'
-                const isWorking = injectingId === exp.id
-                return (
-                  <div
-                    key={exp.id}
-                    className={`rounded-xl border p-4 transition-colors flex flex-col justify-between ${
-                      isInjected
-                        ? 'border-destructive/60 bg-destructive/5'
-                        : 'border-border bg-card'
-                    }`}
-                  >
-                    <div>
-                      <div className='flex items-center justify-between gap-2 mb-2'>
-                        <Badge
-                          variant={isInjected ? 'destructive' : 'secondary'}
-                          className='text-[10px] font-mono'
-                        >
-                          {exp.id.toUpperCase()}
-                        </Badge>
-                        <Badge
-                          variant={isInjected ? 'destructive' : 'outline'}
-                          className='text-[10px]'
-                        >
-                          {isInjected ? '🔴 Falla Activa' : '🟢 Nominal'}
-                        </Badge>
-                      </div>
-                      <h4 className='text-sm font-semibold'>{exp.title}</h4>
-                      <p className='mt-1 text-xs text-muted-foreground'>
-                        {exp.description}
-                      </p>
-                      <div className='mt-3 flex flex-wrap gap-1'>
-                        {exp.interfaces.map((intf) => (
-                          <span
-                            key={intf}
-                            className='inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-mono font-medium text-muted-foreground'
-                          >
-                            {intf}
-                          </span>
-                        ))}
-                        <span className='inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary'>
-                          Obj: {exp.expected_detection}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className='mt-4 pt-3 border-t flex items-center justify-between gap-2'>
-                      <span className='text-[11px] text-muted-foreground'>
-                        {isInjected
-                          ? `Inyectado hace: ${exp.state?.elapsed_seconds ?? 0}s`
-                          : 'Listo para probar'}
-                      </span>
-                      <Button
-                        size='sm'
-                        variant={isInjected ? 'default' : 'outline'}
-                        className={`text-xs gap-1.5 ${
-                          isInjected
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                            : 'border-destructive/40 text-destructive hover:bg-destructive/10'
-                        }`}
-                        disabled={isWorking}
-                        onClick={() => handleExperimentToggle(exp)}
+          <CardContent className='p-0'>
+            <div className='overflow-x-auto'>
+              <table className='w-full text-left text-sm'>
+                <thead className='border-b bg-muted/30 text-xs text-muted-foreground'>
+                  <tr>
+                    <th className='px-4 py-2 font-medium'>Prueba</th>
+                    <th className='px-4 py-2 font-medium'>Estado</th>
+                    <th className='px-4 py-2 font-medium'>Tiempo activo</th>
+                    <th className='px-4 py-2 text-right font-medium'>Acción</th>
+                  </tr>
+                </thead>
+                <tbody className='divide-y'>
+                  {experiments.data?.map((exp) => {
+                    const isInjected = exp.state?.status === 'injected'
+                    const isWorking = injectingId === exp.id
+                    return (
+                      <tr
+                        key={exp.id}
+                        className={isInjected ? 'bg-destructive/5' : ''}
                       >
-                        {isInjected ? (
-                          <>
-                            <RotateCcw className='h-3.5 w-3.5' />
-                            {isWorking ? 'Recuperando...' : 'Restaurar Salud'}
-                          </>
-                        ) : (
-                          <>
-                            <Zap className='h-3.5 w-3.5' />
-                            {isWorking ? 'Inyectando...' : 'Inyectar Falla'}
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
+                        <td className='px-4 py-3'>
+                          <details className='max-w-3xl'>
+                            <summary className='cursor-pointer font-medium'>
+                              {exp.title}
+                            </summary>
+                            <div className='mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground'>
+                              <p>{exp.description}</p>
+                              <p>
+                                Interfaces: {exp.interfaces.join(', ') || '—'}
+                              </p>
+                              <p>
+                                Objetivo de detección: {exp.expected_detection}
+                              </p>
+                            </div>
+                          </details>
+                        </td>
+                        <td className='px-4 py-3 whitespace-nowrap'>
+                          <span
+                            className={
+                              isInjected
+                                ? 'font-medium text-destructive'
+                                : 'text-muted-foreground'
+                            }
+                          >
+                            {isInjected ? 'Falla activa' : 'Nominal'}
+                          </span>
+                        </td>
+                        <td className='px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground'>
+                          {isInjected
+                            ? `${exp.state?.elapsed_seconds ?? 0} s`
+                            : '—'}
+                        </td>
+                        <td className='px-4 py-3 text-right'>
+                          <Button
+                            size='sm'
+                            variant='outline'
+                            className='min-w-28 text-xs'
+                            disabled={injectingId !== null}
+                            onClick={() => handleExperimentToggle(exp)}
+                          >
+                            {isWorking
+                              ? isInjected
+                                ? 'Restaurando…'
+                                : 'Inyectando…'
+                              : isInjected
+                                ? 'Restaurar'
+                                : 'Inyectar falla'}
+                          </Button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {(experiments.isLoading ||
+                    experiments.isError ||
+                    !experiments.data?.length) && (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className='px-4 py-6 text-center text-sm text-muted-foreground'
+                      >
+                        {experiments.isLoading
+                          ? 'Cargando pruebas…'
+                          : experiments.isError
+                            ? 'No se pudo cargar el catálogo de pruebas.'
+                            : 'No hay pruebas disponibles para este escenario.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </CardContent>
         </Card>
       </Main>
-    </>
   )
 }
 
@@ -475,13 +486,16 @@ function ThroughputChart({
       <div className='flex items-center justify-between text-[11px] text-muted-foreground'>
         <div className='flex items-center gap-3'>
           <span className='flex items-center gap-1'>
-            <span className='size-2 rounded-full bg-emerald-500' /> ogstun (Usuario)
+            <span className='size-2 rounded-full bg-emerald-500' /> ogstun
+            (Usuario)
           </span>
           <span className='flex items-center gap-1'>
             <span className='size-2 rounded-full bg-sky-400' /> lo (Control/SBI)
           </span>
         </div>
-        <span className='font-mono text-[10px]'>Máx: {maxVal.toFixed(1)} Kbps</span>
+        <span className='font-mono text-[10px]'>
+          Máx: {maxVal.toFixed(1)} Kbps
+        </span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}

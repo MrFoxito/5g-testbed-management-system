@@ -1,18 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import {
-  Activity,
-  ArrowLeftRight,
-  Clock3,
-  HardDrive,
-  Loader2,
-  Network,
-  Play,
-  Server,
-} from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
+import { Loader2, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,6 +15,7 @@ import type {
   TraceCapabilities,
   TraceCaptureTarget,
 } from '../types'
+import { TraceFormHelp } from './trace-form-help'
 
 type InterfaceTraceFormProps = {
   capabilities?: TraceCapabilities
@@ -104,19 +93,17 @@ export function InterfaceTraceForm({
   return (
     <form
       onSubmit={submit}
-      className='grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]'
+      className='overflow-hidden rounded-lg border bg-card'
     >
-      <div className='space-y-4'>
-        <Card>
-          <CardHeader>
-            <CardTitle className='flex items-center gap-2'>
-              <ArrowLeftRight className='size-5 text-primary' />
-              Objetivo de la captura
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='grid gap-4 sm:grid-cols-2'>
+      <div className='flex items-center justify-between border-b px-5 py-3'>
+        <h2 className='text-sm font-semibold'>Nueva captura por interfaz</h2>
+        <TraceFormHelp mode='interface' />
+      </div>
+      <fieldset disabled={isSubmitting} className='min-w-0 divide-y'>
+        <section className='px-5 py-5'>
+          <div className='grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
             <Field
-              className='sm:col-span-2'
+              className='sm:col-span-2 lg:col-span-3'
               label='Nombre de la tarea'
               htmlFor='interface-task-name'
             >
@@ -132,7 +119,7 @@ export function InterfaceTraceForm({
 
             <Field label='Agente de captura' htmlFor='interface-agent'>
               <Select value={agentId} onValueChange={setSelectedAgent}>
-                <SelectTrigger id='interface-agent'>
+                <SelectTrigger className='w-full' id='interface-agent'>
                   <SelectValue placeholder='Seleccione un agente' />
                 </SelectTrigger>
                 <SelectContent>
@@ -143,9 +130,6 @@ export function InterfaceTraceForm({
                   ))}
                 </SelectContent>
               </Select>
-              <p className='text-xs text-muted-foreground'>
-                Host físico que ejecuta tshark.
-              </p>
             </Field>
 
             <Field label='Función de red' htmlFor='interface-nf'>
@@ -156,7 +140,7 @@ export function InterfaceTraceForm({
                   setSelectedTarget('')
                 }}
               >
-                <SelectTrigger id='interface-nf'>
+                <SelectTrigger className='w-full' id='interface-nf'>
                   <SelectValue placeholder='Seleccione una NF' />
                 </SelectTrigger>
                 <SelectContent>
@@ -170,18 +154,11 @@ export function InterfaceTraceForm({
                   })}
                 </SelectContent>
               </Select>
-              <p className='text-xs text-muted-foreground'>
-                NF lógica desde la que se interpreta la traza.
-              </p>
             </Field>
 
-            <Field
-              className='sm:col-span-2'
-              label='Interfaz 3GPP'
-              htmlFor='interface-target'
-            >
+            <Field label='Interfaz 3GPP' htmlFor='interface-target'>
               <Select value={targetId} onValueChange={setSelectedTarget}>
-                <SelectTrigger id='interface-target'>
+                <SelectTrigger className='w-full' id='interface-target'>
                   <SelectValue placeholder='Seleccione una interfaz' />
                 </SelectTrigger>
                 <SelectContent>
@@ -198,20 +175,14 @@ export function InterfaceTraceForm({
                 </p>
               )}
             </Field>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className='flex items-center gap-2'>
-              <Clock3 className='size-5 text-primary' />
-              Límites de la tarea
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='grid gap-4 sm:grid-cols-2'>
+        <section className='px-5 py-5'>
+          <div className='grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
             <Field label='Duración' htmlFor='interface-duration'>
               <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger id='interface-duration'>
+                <SelectTrigger className='w-full' id='interface-duration'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -225,7 +196,7 @@ export function InterfaceTraceForm({
             </Field>
             <Field label='Tamaño máximo' htmlFor='interface-size'>
               <Select value={maxMegabytes} onValueChange={setMaxMegabytes}>
-                <SelectTrigger id='interface-size'>
+                <SelectTrigger className='w-full' id='interface-size'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -237,98 +208,27 @@ export function InterfaceTraceForm({
                 </SelectContent>
               </Select>
             </Field>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </section>
+      </fieldset>
 
-      <Card className='h-fit xl:sticky xl:top-20'>
-        <CardHeader>
-          <CardTitle className='flex items-center gap-2'>
-            <Activity className='size-5 text-primary' />
-            Resumen de ejecución
-          </CardTitle>
-        </CardHeader>
-        <CardContent className='space-y-5'>
-          <SummaryRow
-            icon={Server}
-            label='Host físico'
-            value={agents.find((item) => item.id === agentId)?.label ?? agentId}
-          />
-          <SummaryRow
-            icon={Network}
-            label='Nodo / NF'
-            value={
-              component
-                ? `${component.node_id} / ${component.label ?? componentId.toUpperCase()}`
-                : 'Sin seleccionar'
-            }
-          />
-          <SummaryRow
-            icon={ArrowLeftRight}
-            label='Interfaz'
-            value={target?.label ?? 'Sin seleccionar'}
-          />
-          <SummaryRow
-            icon={HardDrive}
-            label='Límite'
-            value={`${formatDuration(Number(duration))} · ${maxMegabytes} MB`}
-          />
-
-          {target && (
-            <div className='rounded-lg border bg-muted/30 p-3'>
-              <p className='text-xs font-medium text-muted-foreground'>
-                Protocolos observables
-              </p>
-              <div className='mt-2 flex flex-wrap gap-1.5'>
-                {targetProtocols(target).map((protocol) => (
-                  <Badge key={protocol} variant='outline'>
-                    {protocol.toUpperCase()}
-                  </Badge>
-                ))}
-              </div>
-              {!!target.procedures?.length && (
-                <p className='mt-3 text-xs leading-relaxed text-muted-foreground'>
-                  {target.procedures.join(' · ')}
-                </p>
-              )}
-            </div>
-          )}
-
-          {targetId.toLowerCase() === 'n2' && (
-            <Alert>
-              <Network />
-              <AlertTitle>N1 se decodifica sobre N2</AlertTitle>
-              <AlertDescription>
-                Los mensajes NAS del UE viajan encapsulados en NGAP; no se
-                presenta N1 como una interfaz física independiente.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {!canCreate && (
-            <p className='text-sm text-muted-foreground'>
-              Tu rol no tiene un testbed habilitado para iniciar capturas.
-            </p>
-          )}
-          <Button
-            className='w-full'
-            type='submit'
-            disabled={
-              !canCreate ||
-              !component ||
-              !target ||
-              !name.trim() ||
-              isSubmitting
-            }
-          >
-            {isSubmitting ? <Loader2 className='animate-spin' /> : <Play />}
-            Crear e iniciar Interface Trace
-          </Button>
-          <p className='text-center text-xs text-muted-foreground'>
-            Solo se utilizan perfiles de captura autorizados por el servidor.
+      <div className='flex flex-wrap items-center justify-end gap-3 border-t bg-muted/20 px-5 py-3'>
+        {!canCreate && (
+          <p className='mr-auto text-xs text-muted-foreground'>
+            Sin permiso para iniciar capturas.
           </p>
-        </CardContent>
-      </Card>
+        )}
+        <Button
+          className='min-w-36'
+          type='submit'
+          disabled={
+            !canCreate || !component || !target || !name.trim() || isSubmitting
+          }
+        >
+          {isSubmitting ? <Loader2 className='animate-spin' /> : <Play />}
+          Iniciar captura
+        </Button>
+      </div>
     </form>
   )
 }
@@ -352,38 +252,8 @@ function Field({
   )
 }
 
-function SummaryRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Server
-  label: string
-  value: string
-}) {
-  return (
-    <div className='flex items-start gap-3'>
-      <div className='rounded-md bg-muted p-2'>
-        <Icon className='size-4 text-muted-foreground' />
-      </div>
-      <div className='min-w-0'>
-        <p className='text-xs text-muted-foreground'>{label}</p>
-        <p className='truncate text-sm font-medium'>{value}</p>
-      </div>
-    </div>
-  )
-}
-
 function FormSkeleton() {
-  return (
-    <div className='grid animate-pulse gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]'>
-      <div className='space-y-4'>
-        <div className='h-80 rounded-xl bg-muted' />
-        <div className='h-44 rounded-xl bg-muted' />
-      </div>
-      <div className='h-96 rounded-xl bg-muted' />
-    </div>
-  )
+  return <div className='h-80 animate-pulse rounded-lg border bg-muted/40' />
 }
 
 function targetSupportsComponent(
@@ -397,11 +267,6 @@ function targetSupportsComponent(
     ...(target.nf_ids ?? []),
   ].filter(Boolean)
   return !supported.length || supported.includes(componentId)
-}
-
-function targetProtocols(target: TraceCaptureTarget) {
-  if (target.protocols?.length) return target.protocols
-  return target.protocol ? [target.protocol] : [target.id]
 }
 
 function makeTaskName(prefix: string) {

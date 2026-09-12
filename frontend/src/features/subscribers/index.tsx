@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Activity,
   Check,
   Copy,
   Edit,
@@ -10,25 +9,16 @@ import {
   Plus,
   Radio,
   RefreshCw,
-  Shield,
   Trash2,
   UserPlus,
-  Users,
   Wifi,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { api, apiErrorMessage, canOperate } from '@/lib/api'
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -47,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { EmsPage } from '@/features/ems-page'
 
 type PduSession = {
@@ -97,7 +88,9 @@ export function SubscribersPage() {
   const isOperator = canOperate(role)
 
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'registered' | 'offline'>('all')
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | 'registered' | 'offline'
+  >('all')
 
   // Modals state
   const [createOpen, setCreateOpen] = useState(false)
@@ -135,13 +128,21 @@ export function SubscribersPage() {
     },
     onError: (error) =>
       toast.error('No se pudo aprovisionar el suscriptor', {
-        description: apiErrorMessage(error, 'El IMSI ya existe o formato incorrecto.'),
+        description: apiErrorMessage(
+          error,
+          'El IMSI ya existe o formato incorrecto.'
+        ),
       }),
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ imsi, payload }: { imsi: string; payload: Record<string, unknown> }) =>
-      api.put(`/subscribers/${imsi}`, payload),
+    mutationFn: ({
+      imsi,
+      payload,
+    }: {
+      imsi: string
+      payload: Record<string, unknown>
+    }) => api.put(`/subscribers/${imsi}`, payload),
     onSuccess: () => {
       toast.success('Perfil de suscriptor actualizado')
       setEditSub(null)
@@ -149,7 +150,10 @@ export function SubscribersPage() {
     },
     onError: (error) =>
       toast.error('No se pudo actualizar el suscriptor', {
-        description: apiErrorMessage(error, 'Verifique los parámetros ingresados.'),
+        description: apiErrorMessage(
+          error,
+          'Verifique los parámetros ingresados.'
+        ),
       }),
   })
 
@@ -162,7 +166,10 @@ export function SubscribersPage() {
     },
     onError: (error) =>
       toast.error('No se pudo eliminar el suscriptor', {
-        description: apiErrorMessage(error, 'Error al contactar con la base de datos.'),
+        description: apiErrorMessage(
+          error,
+          'Error al contactar con la base de datos.'
+        ),
       }),
   })
 
@@ -170,13 +177,6 @@ export function SubscribersPage() {
 
   const registeredCount = useMemo(
     () => subscribers.filter((s) => s.live_status?.registered).length,
-    [subscribers]
-  )
-  const pduSessionCount = useMemo(
-    () =>
-      subscribers.filter(
-        (s) => (s.live_status?.pdu_sessions?.length ?? 0) > 0
-      ).length,
     [subscribers]
   )
 
@@ -225,112 +225,26 @@ export function SubscribersPage() {
     <EmsPage
       title='Suscriptores y Perfiles SIM'
       description='Gestión de identidades 5G/4G sobre la base de datos UDM/UDR con telemetría de registro NAS y sesiones PDU en vivo.'
-      actions={
-        <div className='flex items-center gap-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
-            className='gap-1.5'
-          >
-            <RefreshCw className={`size-3.5 ${query.isFetching ? 'animate-spin' : ''}`} />
-            Actualizar
-          </Button>
-          {isOperator && (
-            <Button
-              size='sm'
-              onClick={() => setCreateOpen(true)}
-              className='gap-1.5'
-            >
-              <Plus className='size-4' />
-              Aprovisionar Suscriptor
-            </Button>
-          )}
-        </div>
-      }
     >
-      {/* STATS CARDS */}
-      <div className='grid gap-4 sm:grid-cols-3 mb-4'>
-        <Card className='p-4 flex items-center justify-between'>
-          <div>
-            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-              Total Suscriptores
-            </p>
-            <h3 className='text-2xl font-black font-mono mt-1'>
-              {subscribers.length}
-            </h3>
-            <p className='text-[11px] text-muted-foreground mt-0.5'>
-              Provisionados en MongoDB UDR
-            </p>
-          </div>
-          <div className='p-2.5 rounded-xl bg-primary/10 text-primary'>
-            <Users className='size-5' />
-          </div>
-        </Card>
-
-        <Card className='p-4 flex items-center justify-between'>
-          <div>
-            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-              Registrados en Vivo
-            </p>
-            <h3 className='text-2xl font-black font-mono mt-1 text-emerald-600 dark:text-emerald-400'>
-              {registeredCount}
-            </h3>
-            <p className='text-[11px] text-muted-foreground mt-0.5'>
-              Estado NAS 5G: RM-REGISTERED
-            </p>
-          </div>
-          <div className='p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600'>
-            <Activity className='size-5' />
-          </div>
-        </Card>
-
-        <Card className='p-4 flex items-center justify-between'>
-          <div>
-            <p className='text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-              Sesiones PDU Activas
-            </p>
-            <h3 className='text-2xl font-black font-mono mt-1 text-sky-600 dark:text-sky-400'>
-              {pduSessionCount}
-            </h3>
-            <p className='text-[11px] text-muted-foreground mt-0.5'>
-              Plano de usuario UPF establecido
-            </p>
-          </div>
-          <div className='p-2.5 rounded-xl bg-sky-500/10 text-sky-600'>
-            <Globe className='size-5' />
-          </div>
-        </Card>
-      </div>
-
       {/* FILTER AND TABLE CARD */}
-      <Card>
-        <CardHeader className='pb-3'>
+      <Card className='gap-0 overflow-hidden py-0 shadow-none'>
+        <CardHeader className='px-4 py-3'>
           <div className='flex flex-wrap items-center justify-between gap-3'>
-            <div>
-              <CardTitle className='text-base font-semibold'>
-                Directorio de Suscriptores HSS / UDR
-              </CardTitle>
-              <CardDescription className='text-xs'>
-                Consulta de autenticación 5G-AKA / Milenage y estado del contexto de sesión.
-              </CardDescription>
-            </div>
-
             <div className='flex flex-wrap items-center gap-2'>
               <Input
                 placeholder='Buscar por IMSI o APN…'
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className='h-8 w-56 text-xs'
+                className='h-9 w-full sm:w-56'
+                aria-label='Buscar por IMSI o APN'
               />
-              <div className='flex rounded-md border p-0.5 bg-muted/30 text-xs'>
+              <div className='flex rounded-md border bg-muted/30 p-0.5 text-xs'>
                 <button
                   type='button'
                   onClick={() => setStatusFilter('all')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     statusFilter === 'all'
-                      ? 'bg-background shadow-xs font-semibold text-foreground'
+                      ? 'bg-background font-semibold text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -339,9 +253,9 @@ export function SubscribersPage() {
                 <button
                   type='button'
                   onClick={() => setStatusFilter('registered')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     statusFilter === 'registered'
-                      ? 'bg-background shadow-xs font-semibold text-emerald-600'
+                      ? 'bg-background font-semibold text-emerald-600 shadow-xs'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -350,9 +264,9 @@ export function SubscribersPage() {
                 <button
                   type='button'
                   onClick={() => setStatusFilter('offline')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                     statusFilter === 'offline'
-                      ? 'bg-background shadow-xs font-semibold text-foreground'
+                      ? 'bg-background font-semibold text-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -360,33 +274,80 @@ export function SubscribersPage() {
                 </button>
               </div>
             </div>
+            <div className='flex items-center gap-2'>
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => void query.refetch()}
+                disabled={query.isFetching}
+                className='gap-1.5'
+              >
+                <RefreshCw
+                  className={`size-3.5 ${query.isFetching ? 'animate-spin' : ''}`}
+                />
+                Actualizar
+              </Button>
+              {isOperator && (
+                <Button
+                  size='sm'
+                  onClick={() => setCreateOpen(true)}
+                  className='gap-1.5'
+                >
+                  <Plus className='size-4' />
+                  Nuevo suscriptor
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className='p-0'>
-          <div className='border-t overflow-x-auto'>
+          <div className='overflow-x-auto border-t'>
             <Table>
               <TableHeader>
-                <TableRow className='bg-muted/40 text-[11px] uppercase tracking-wider'>
-                  <TableHead className='font-semibold'>IMSI / Identidad</TableHead>
-                  <TableHead className='font-semibold'>Estado 3GPP (NAS)</TableHead>
-                  <TableHead className='font-semibold'>Sesión PDU / IP</TableHead>
-                  <TableHead className='font-semibold'>Slice (S-NSSAI)</TableHead>
+                <TableRow className='bg-muted/40 text-[11px] tracking-wider uppercase'>
+                  <TableHead className='font-semibold'>IMSI</TableHead>
+                  <TableHead className='font-semibold'>Estado NAS</TableHead>
+                  <TableHead className='font-semibold'>
+                    Sesión PDU / IP
+                  </TableHead>
+                  <TableHead className='font-semibold'>
+                    Slice (S-NSSAI)
+                  </TableHead>
                   <TableHead className='font-semibold'>APN / DNN</TableHead>
-                  <TableHead className='font-semibold'>Seguridad (K / OPc)</TableHead>
-                  <TableHead className='text-right font-semibold'>Acciones</TableHead>
+                  <TableHead className='text-right font-semibold'>
+                    Acciones
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {query.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className='h-32 text-center text-xs text-muted-foreground'>
+                    <TableCell
+                      colSpan={6}
+                      className='h-32 text-center text-xs text-muted-foreground'
+                    >
                       Cargando suscriptores y consultando estado en vivo…
+                    </TableCell>
+                  </TableRow>
+                ) : query.isError ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={6}
+                      className='h-24 text-center text-sm text-destructive'
+                    >
+                      No se pudieron cargar los suscriptores. Actualiza para
+                      reintentar.
                     </TableCell>
                   </TableRow>
                 ) : filteredSubscribers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className='h-32 text-center text-xs text-muted-foreground'>
-                      {search ? 'Sin coincidencias para la búsqueda.' : 'No hay suscriptores aprovisionados.'}
+                    <TableCell
+                      colSpan={6}
+                      className='h-32 text-center text-xs text-muted-foreground'
+                    >
+                      {search || statusFilter !== 'all'
+                        ? 'Sin coincidencias para los filtros.'
+                        : 'No hay suscriptores aprovisionados.'}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -396,7 +357,10 @@ export function SubscribersPage() {
                     const dnn = slice?.session?.[0]?.name ?? 'internet'
 
                     return (
-                      <TableRow key={sub.imsi} className='hover:bg-muted/30 text-xs'>
+                      <TableRow
+                        key={sub.imsi}
+                        className='text-xs hover:bg-muted/30'
+                      >
                         <TableCell className='font-mono font-bold whitespace-nowrap'>
                           <div className='flex items-center gap-1.5'>
                             <span>{sub.imsi}</span>
@@ -419,57 +383,62 @@ export function SubscribersPage() {
                         <TableCell className='whitespace-nowrap'>
                           {live?.registered ? (
                             <div className='flex flex-col gap-0.5'>
-                              <Badge className='w-fit bg-emerald-600 text-white text-[10px] font-mono gap-1'>
-                                <span className='size-1.5 rounded-full bg-white animate-ping' />
+                              <Badge className='w-fit gap-1 bg-emerald-600 font-mono text-[10px] text-white'>
+                                <span className='size-1.5 rounded-full bg-white' />
                                 RM-REGISTERED
                               </Badge>
-                              <span className='text-[10px] font-mono text-muted-foreground'>
-                                {live.cm_state} {live.cell_id ? `· Cell ${live.cell_id}` : ''}
+                              <span className='font-mono text-[10px] text-muted-foreground'>
+                                {live.cm_state}{' '}
+                                {live.cell_id ? `· Cell ${live.cell_id}` : ''}
                               </span>
                             </div>
                           ) : (
-                            <Badge variant='outline' className='text-[10px] text-muted-foreground font-mono'>
+                            <Badge
+                              variant='outline'
+                              className='font-mono text-[10px] text-muted-foreground'
+                            >
                               DEREGISTERED
                             </Badge>
                           )}
                         </TableCell>
 
-                        <TableCell className='whitespace-nowrap font-mono'>
+                        <TableCell className='font-mono whitespace-nowrap'>
                           {live?.pdu_sessions?.length ? (
                             <div className='flex flex-col gap-0.5'>
-                              <Badge variant='secondary' className='w-fit text-[10px] font-mono gap-1 text-sky-600 dark:text-sky-400'>
+                              <Badge
+                                variant='secondary'
+                                className='w-fit gap-1 font-mono text-[10px] text-sky-600 dark:text-sky-400'
+                              >
                                 <Wifi className='size-3' />
                                 {live.active_ip ?? 'PS-ACTIVE'}
                               </Badge>
                               <span className='text-[10px] text-muted-foreground'>
-                                {live.pdu_sessions[0].session_id} · {live.pdu_sessions[0].apn}
+                                {live.pdu_sessions[0].session_id} ·{' '}
+                                {live.pdu_sessions[0].apn}
                               </span>
                             </div>
                           ) : (
-                            <span className='text-muted-foreground text-[11px]'>Sin sesión PDU</span>
+                            <span className='text-[11px] text-muted-foreground'>
+                              Sin sesión PDU
+                            </span>
                           )}
                         </TableCell>
 
-                        <TableCell className='font-mono whitespace-nowrap text-xs'>
-                          <span className='font-semibold'>SST {slice?.sst ?? 1}</span>
+                        <TableCell className='font-mono text-xs whitespace-nowrap'>
+                          <span className='font-semibold'>
+                            SST {slice?.sst ?? 1}
+                          </span>
                           {slice?.sd && (
-                            <span className='text-muted-foreground ml-1'>
+                            <span className='ml-1 text-muted-foreground'>
                               / SD {slice.sd}
                             </span>
                           )}
                         </TableCell>
 
                         <TableCell className='font-mono text-xs whitespace-nowrap'>
-                          <span className='px-1.5 py-0.5 rounded bg-muted text-foreground'>
+                          <span className='rounded bg-muted px-1.5 py-0.5 text-foreground'>
                             {dnn}
                           </span>
-                        </TableCell>
-
-                        <TableCell className='font-mono text-[11px] whitespace-nowrap text-muted-foreground'>
-                          <div className='flex items-center gap-1' title={`K: ${sub.security.k}`}>
-                            <Shield className='size-3 text-muted-foreground/60' />
-                            <span>K: {sub.security.k}</span>
-                          </div>
                         </TableCell>
 
                         <TableCell className='text-right whitespace-nowrap'>
@@ -515,123 +484,186 @@ export function SubscribersPage() {
               </TableBody>
             </Table>
           </div>
+          <div className='border-t px-4 py-2 text-xs text-muted-foreground'>
+            {filteredSubscribers.length} de {subscribers.length} suscriptores
+          </div>
         </CardContent>
       </Card>
 
       {/* MODAL DETALLES 3GPP */}
-      <Dialog open={Boolean(detailSub)} onOpenChange={(o) => !o && setDetailSub(null)}>
-        <DialogContent className='sm:max-w-lg'>
+      <Dialog
+        open={Boolean(detailSub)}
+        onOpenChange={(o) => !o && setDetailSub(null)}
+      >
+        <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-lg'>
           <DialogHeader>
             <DialogTitle className='flex items-center gap-2 text-base font-bold'>
               <Radio className='size-4 text-primary' />
               Detalles 3GPP · IMSI {detailSub?.imsi}
             </DialogTitle>
             <DialogDescription className='text-xs'>
-              Parámetros de contexto de movilidad (5GMM) y sesión de datos (5GSM).
+              Parámetros de contexto de movilidad (5GMM) y sesión de datos
+              (5GSM).
             </DialogDescription>
           </DialogHeader>
 
           {detailSub && (
             <div className='space-y-4 py-2 text-xs'>
               {/* Status Banner */}
-              <div className={`p-3 rounded-lg border flex items-center justify-between ${
-                detailSub.live_status?.registered
-                  ? 'bg-emerald-500/10 border-emerald-500/30'
-                  : 'bg-muted/40 border-border'
-              }`}>
+              <div
+                className={`flex items-center justify-between rounded-lg border p-3 ${
+                  detailSub.live_status?.registered
+                    ? 'border-emerald-500/30 bg-emerald-500/10'
+                    : 'border-border bg-muted/40'
+                }`}
+              >
                 <div>
-                  <p className='font-semibold text-sm'>
-                    {detailSub.live_status?.registered ? 'Registrado en la Red 5G' : 'Desconectado / Idle'}
+                  <p className='text-sm font-semibold'>
+                    {detailSub.live_status?.registered
+                      ? 'Registrado en la Red 5G'
+                      : 'Desconectado / Idle'}
                   </p>
-                  <p className='text-muted-foreground text-[11px] mt-0.5'>
-                    Estado NAS: {detailSub.live_status?.rm_state ?? 'RM-DEREGISTERED'} ({detailSub.live_status?.cm_state ?? 'CM-IDLE'})
+                  <p className='mt-0.5 text-[11px] text-muted-foreground'>
+                    Estado NAS:{' '}
+                    {detailSub.live_status?.rm_state ?? 'RM-DEREGISTERED'} (
+                    {detailSub.live_status?.cm_state ?? 'CM-IDLE'})
                   </p>
                 </div>
-                <Badge className={detailSub.live_status?.registered ? 'bg-emerald-600 text-white' : ''}>
+                <Badge
+                  className={
+                    detailSub.live_status?.registered
+                      ? 'bg-emerald-600 text-white'
+                      : ''
+                  }
+                >
                   {detailSub.live_status?.registered ? 'EN LÍNEA' : 'OFFLINE'}
                 </Badge>
               </div>
 
               {/* Grid 3GPP */}
-              <div className='grid grid-cols-2 gap-3 rounded-lg border p-3 bg-muted/10 font-mono'>
+              <div className='grid grid-cols-2 gap-3 rounded-lg border bg-muted/10 p-3 font-mono'>
                 <div>
-                  <span className='text-[10px] text-muted-foreground block uppercase'>GUTI / TMSI</span>
-                  <span className='font-semibold text-xs'>{detailSub.live_status?.guti || 'No asignado'}</span>
+                  <span className='block text-[10px] text-muted-foreground uppercase'>
+                    GUTI / TMSI
+                  </span>
+                  <span className='text-xs font-semibold'>
+                    {detailSub.live_status?.guti || 'No asignado'}
+                  </span>
                 </div>
                 <div>
-                  <span className='text-[10px] text-muted-foreground block uppercase'>Celda Conectada (Cell ID)</span>
-                  <span className='font-semibold text-xs'>{detailSub.live_status?.cell_id ?? 'Ninguna'}</span>
+                  <span className='block text-[10px] text-muted-foreground uppercase'>
+                    Celda Conectada (Cell ID)
+                  </span>
+                  <span className='text-xs font-semibold'>
+                    {detailSub.live_status?.cell_id ?? 'Ninguna'}
+                  </span>
                 </div>
                 <div>
-                  <span className='text-[10px] text-muted-foreground block uppercase'>Tracking Area Code (TAC)</span>
-                  <span className='font-semibold text-xs'>{detailSub.live_status?.tac ?? '—'}</span>
+                  <span className='block text-[10px] text-muted-foreground uppercase'>
+                    Tracking Area Code (TAC)
+                  </span>
+                  <span className='text-xs font-semibold'>
+                    {detailSub.live_status?.tac ?? '—'}
+                  </span>
                 </div>
                 <div>
-                  <span className='text-[10px] text-muted-foreground block uppercase'>Estado MM</span>
-                  <span className='font-semibold text-xs'>{detailSub.live_status?.mm_state ?? '—'}</span>
+                  <span className='block text-[10px] text-muted-foreground uppercase'>
+                    Estado MM
+                  </span>
+                  <span className='text-xs font-semibold'>
+                    {detailSub.live_status?.mm_state ?? '—'}
+                  </span>
                 </div>
               </div>
 
               {/* PDU Session Details */}
               <div>
-                <h4 className='font-semibold mb-2 flex items-center gap-1.5'>
+                <h4 className='mb-2 flex items-center gap-1.5 font-semibold'>
                   <Globe className='size-3.5 text-sky-500' />
                   Sesión de Plano de Usuario (PDU Session)
                 </h4>
                 {detailSub.live_status?.pdu_sessions?.length ? (
                   detailSub.live_status.pdu_sessions.map((ps, idx) => (
-                    <div key={idx} className='rounded-lg border p-3 space-y-1.5 font-mono text-xs bg-muted/10'>
+                    <div
+                      key={idx}
+                      className='space-y-1.5 rounded-lg border bg-muted/10 p-3 font-mono text-xs'
+                    >
                       <div className='flex justify-between font-bold'>
                         <span>{ps.session_id || `Sesión ${idx + 1}`}</span>
-                        <Badge variant='outline' className='text-sky-600 dark:text-sky-400 font-semibold'>
+                        <Badge
+                          variant='outline'
+                          className='font-semibold text-sky-600 dark:text-sky-400'
+                        >
                           {ps.state || 'PS-ACTIVE'}
                         </Badge>
                       </div>
                       <div className='grid grid-cols-2 gap-2 pt-1'>
                         <div>
-                          <span className='text-[10px] text-muted-foreground block'>IP Asignada</span>
-                          <span className='font-bold text-sm text-foreground'>{ps.address || '10.45.0.2'}</span>
+                          <span className='block text-[10px] text-muted-foreground'>
+                            IP Asignada
+                          </span>
+                          <span className='text-sm font-bold text-foreground'>
+                            {ps.address || '10.45.0.2'}
+                          </span>
                         </div>
                         <div>
-                          <span className='text-[10px] text-muted-foreground block'>Tipo de Sesión</span>
+                          <span className='block text-[10px] text-muted-foreground'>
+                            Tipo de Sesión
+                          </span>
                           <span>{ps.type || 'IPv4'}</span>
                         </div>
                         <div>
-                          <span className='text-[10px] text-muted-foreground block'>APN / Data Network Name</span>
+                          <span className='block text-[10px] text-muted-foreground'>
+                            APN / Data Network Name
+                          </span>
                           <span>{ps.apn || 'internet'}</span>
                         </div>
                         <div>
-                          <span className='text-[10px] text-muted-foreground block'>Velocidad Máxima (AMBR)</span>
+                          <span className='block text-[10px] text-muted-foreground'>
+                            Velocidad Máxima (AMBR)
+                          </span>
                           <span>{ps.ambr || '1 Gbps'}</span>
                         </div>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <p className='text-xs text-muted-foreground p-3 rounded-lg border bg-muted/20'>
-                    El equipo de usuario no tiene túneles GTP-U ni sesiones PDU activas en este momento.
+                  <p className='rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground'>
+                    El equipo de usuario no tiene túneles GTP-U ni sesiones PDU
+                    activas en este momento.
                   </p>
                 )}
               </div>
 
               {/* Slice & Security */}
-              <div className='rounded-lg border p-3 space-y-2 bg-muted/10 text-xs'>
+              <div className='space-y-2 rounded-lg border bg-muted/10 p-3 text-xs'>
                 <h4 className='font-semibold'>Parámetros SIM y Slice</h4>
                 <div className='grid grid-cols-2 gap-2 font-mono'>
                   <div>
-                    <span className='text-[10px] text-muted-foreground block'>Slice SST / SD</span>
-                    <span>SST: {detailSub.slice?.[0]?.sst ?? 1} / SD: {detailSub.slice?.[0]?.sd ?? '—'}</span>
+                    <span className='block text-[10px] text-muted-foreground'>
+                      Slice SST / SD
+                    </span>
+                    <span>
+                      SST: {detailSub.slice?.[0]?.sst ?? 1} / SD:{' '}
+                      {detailSub.slice?.[0]?.sd ?? '—'}
+                    </span>
                   </div>
                   <div>
-                    <span className='text-[10px] text-muted-foreground block'>Clave de Autenticación K</span>
+                    <span className='block text-[10px] text-muted-foreground'>
+                      Clave de Autenticación K
+                    </span>
                     <span>{detailSub.security.k}</span>
                   </div>
                   <div>
-                    <span className='text-[10px] text-muted-foreground block'>Operador OPc</span>
+                    <span className='block text-[10px] text-muted-foreground'>
+                      Operador OPc
+                    </span>
                     <span>{detailSub.security.opc}</span>
                   </div>
                   <div>
-                    <span className='text-[10px] text-muted-foreground block'>AMF Vector</span>
+                    <span className='block text-[10px] text-muted-foreground'>
+                      AMF Vector
+                    </span>
                     <span>{detailSub.security.amf ?? '8000'}</span>
                   </div>
                 </div>
@@ -649,14 +681,15 @@ export function SubscribersPage() {
 
       {/* MODAL CREAR SUSCRIPTOR */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className='sm:max-w-lg'>
+        <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-lg'>
           <DialogHeader>
-            <DialogTitle className='text-base font-bold flex items-center gap-2'>
+            <DialogTitle className='flex items-center gap-2 text-base font-bold'>
               <UserPlus className='size-4 text-primary' />
               Aprovisionar Nuevo Suscriptor SIM
             </DialogTitle>
             <DialogDescription className='text-xs'>
-              Registra un nuevo IMSI en MongoDB para permitir su registro en el Core 5G SA / 4G EPC.
+              Registra un nuevo IMSI en MongoDB para permitir su registro en el
+              Core 5G SA / 4G EPC.
             </DialogDescription>
           </DialogHeader>
 
@@ -668,23 +701,34 @@ export function SubscribersPage() {
             className='space-y-3 py-2 text-xs'
           >
             <div>
-              <Label className='text-xs font-semibold'>IMSI (14 o 15 dígitos)</Label>
+              <Label className='text-xs font-semibold'>
+                IMSI (14 o 15 dígitos)
+              </Label>
               <Input
                 value={createForm.imsi}
-                onChange={(e) => setCreateForm({ ...createForm, imsi: e.target.value })}
+                onChange={(e) =>
+                  setCreateForm({ ...createForm, imsi: e.target.value })
+                }
                 placeholder='999700000000002'
-                className='h-8 font-mono text-xs mt-1'
+                className='mt-1 h-8 font-mono text-xs'
                 required
               />
             </div>
 
             <div className='grid grid-cols-2 gap-3'>
               <div>
-                <Label className='text-xs font-semibold'>Clave K (32 hex)</Label>
+                <Label className='text-xs font-semibold'>
+                  Clave K (32 hex)
+                </Label>
                 <Input
                   value={createForm.key}
-                  onChange={(e) => setCreateForm({ ...createForm, key: e.target.value.toUpperCase() })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setCreateForm({
+                      ...createForm,
+                      key: e.target.value.toUpperCase(),
+                    })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                   required
                 />
               </div>
@@ -692,8 +736,13 @@ export function SubscribersPage() {
                 <Label className='text-xs font-semibold'>OPc (32 hex)</Label>
                 <Input
                   value={createForm.opc}
-                  onChange={(e) => setCreateForm({ ...createForm, opc: e.target.value.toUpperCase() })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setCreateForm({
+                      ...createForm,
+                      opc: e.target.value.toUpperCase(),
+                    })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                   required
                 />
               </div>
@@ -704,9 +753,11 @@ export function SubscribersPage() {
                 <Label className='text-xs font-semibold'>APN / DNN</Label>
                 <Input
                   value={createForm.apn_dnn}
-                  onChange={(e) => setCreateForm({ ...createForm, apn_dnn: e.target.value })}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, apn_dnn: e.target.value })
+                  }
                   placeholder='internet'
-                  className='h-8 font-mono text-xs mt-1'
+                  className='mt-1 h-8 font-mono text-xs'
                   required
                 />
               </div>
@@ -715,30 +766,48 @@ export function SubscribersPage() {
                 <Input
                   type='number'
                   value={createForm.sst}
-                  onChange={(e) => setCreateForm({ ...createForm, sst: Number(e.target.value) })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setCreateForm({
+                      ...createForm,
+                      sst: Number(e.target.value),
+                    })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                   min={1}
                   max={255}
                   required
                 />
               </div>
               <div>
-                <Label className='text-xs font-semibold'>SD (Slice Differentiator)</Label>
+                <Label className='text-xs font-semibold'>
+                  SD (Slice Differentiator)
+                </Label>
                 <Input
                   value={createForm.sd}
-                  onChange={(e) => setCreateForm({ ...createForm, sd: e.target.value.toUpperCase() })}
+                  onChange={(e) =>
+                    setCreateForm({
+                      ...createForm,
+                      sd: e.target.value.toUpperCase(),
+                    })
+                  }
                   placeholder='000001'
-                  className='h-8 font-mono text-xs mt-1'
+                  className='mt-1 h-8 font-mono text-xs'
                 />
               </div>
             </div>
 
             <DialogFooter className='pt-3'>
-              <Button type='button' variant='outline' onClick={() => setCreateOpen(false)}>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => setCreateOpen(false)}
+              >
                 Cancelar
               </Button>
               <Button type='submit' disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Aprovisionando…' : 'Crear Suscriptor'}
+                {createMutation.isPending
+                  ? 'Aprovisionando…'
+                  : 'Crear Suscriptor'}
               </Button>
             </DialogFooter>
           </form>
@@ -746,15 +815,19 @@ export function SubscribersPage() {
       </Dialog>
 
       {/* MODAL EDITAR SUSCRIPTOR */}
-      <Dialog open={Boolean(editSub)} onOpenChange={(o) => !o && setEditSub(null)}>
-        <DialogContent className='sm:max-w-lg'>
+      <Dialog
+        open={Boolean(editSub)}
+        onOpenChange={(o) => !o && setEditSub(null)}
+      >
+        <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-lg'>
           <DialogHeader>
-            <DialogTitle className='text-base font-bold flex items-center gap-2'>
+            <DialogTitle className='flex items-center gap-2 text-base font-bold'>
               <Edit className='size-4 text-primary' />
               Editar Suscriptor · IMSI {editSub?.imsi}
             </DialogTitle>
             <DialogDescription className='text-xs'>
-              Modifica los parámetros de slice, sesión de datos o actualiza las credenciales de cifrado.
+              Modifica los parámetros de slice, sesión de datos o actualiza las
+              credenciales de cifrado.
             </DialogDescription>
           </DialogHeader>
 
@@ -780,21 +853,35 @@ export function SubscribersPage() {
           >
             <div className='grid grid-cols-2 gap-3'>
               <div>
-                <Label className='text-xs font-semibold'>Nueva Clave K (Opcional, 32 hex)</Label>
+                <Label className='text-xs font-semibold'>
+                  Nueva Clave K (Opcional, 32 hex)
+                </Label>
                 <Input
                   value={editForm.key}
-                  onChange={(e) => setEditForm({ ...editForm, key: e.target.value.toUpperCase() })}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      key: e.target.value.toUpperCase(),
+                    })
+                  }
                   placeholder='Dejar en blanco para mantener'
-                  className='h-8 font-mono text-xs mt-1'
+                  className='mt-1 h-8 font-mono text-xs'
                 />
               </div>
               <div>
-                <Label className='text-xs font-semibold'>Nuevo OPc (Opcional, 32 hex)</Label>
+                <Label className='text-xs font-semibold'>
+                  Nuevo OPc (Opcional, 32 hex)
+                </Label>
                 <Input
                   value={editForm.opc}
-                  onChange={(e) => setEditForm({ ...editForm, opc: e.target.value.toUpperCase() })}
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      opc: e.target.value.toUpperCase(),
+                    })
+                  }
                   placeholder='Dejar en blanco para mantener'
-                  className='h-8 font-mono text-xs mt-1'
+                  className='mt-1 h-8 font-mono text-xs'
                 />
               </div>
             </div>
@@ -804,8 +891,10 @@ export function SubscribersPage() {
                 <Label className='text-xs font-semibold'>APN / DNN</Label>
                 <Input
                   value={editForm.apn_dnn}
-                  onChange={(e) => setEditForm({ ...editForm, apn_dnn: e.target.value })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, apn_dnn: e.target.value })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                   required
                 />
               </div>
@@ -814,8 +903,10 @@ export function SubscribersPage() {
                 <Input
                   type='number'
                   value={editForm.sst}
-                  onChange={(e) => setEditForm({ ...editForm, sst: Number(e.target.value) })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setEditForm({ ...editForm, sst: Number(e.target.value) })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                   min={1}
                   max={255}
                   required
@@ -825,14 +916,23 @@ export function SubscribersPage() {
                 <Label className='text-xs font-semibold'>SD (Slice Diff)</Label>
                 <Input
                   value={editForm.sd}
-                  onChange={(e) => setEditForm({ ...editForm, sd: e.target.value.toUpperCase() })}
-                  className='h-8 font-mono text-xs mt-1'
+                  onChange={(e) =>
+                    setEditForm({
+                      ...editForm,
+                      sd: e.target.value.toUpperCase(),
+                    })
+                  }
+                  className='mt-1 h-8 font-mono text-xs'
                 />
               </div>
             </div>
 
             <DialogFooter className='pt-3'>
-              <Button type='button' variant='outline' onClick={() => setEditSub(null)}>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => setEditSub(null)}
+              >
                 Cancelar
               </Button>
               <Button type='submit' disabled={updateMutation.isPending}>
@@ -852,7 +952,9 @@ export function SubscribersPage() {
         confirmText='Eliminar Suscriptor'
         destructive
         isLoading={deleteMutation.isPending}
-        handleConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
+        handleConfirm={() =>
+          deleteTarget && deleteMutation.mutate(deleteTarget)
+        }
       />
     </EmsPage>
   )

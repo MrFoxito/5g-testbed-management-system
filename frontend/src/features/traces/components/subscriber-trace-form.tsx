@@ -1,24 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  Activity,
-  Check,
-  ChevronsUpDown,
-  Fingerprint,
-  Info,
-  Loader2,
-  Network,
-  Play,
-  Route,
-  ShieldCheck,
-  UserRoundSearch,
-} from 'lucide-react'
+import { Check, ChevronsUpDown, Loader2, Play } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Command,
@@ -49,6 +34,7 @@ import {
   type TraceCapabilities,
   type TraceOption,
 } from '../types'
+import { TraceFormHelp } from './trace-form-help'
 
 type SubscriberListItem = {
   imsi: string
@@ -114,23 +100,6 @@ export function SubscriberTraceForm({
     { id: 'supi', label: 'SUPI' },
     { id: 'ue-ip', label: 'Dirección IP del UE' },
   ]
-  const participatingComponents =
-    subscriberCapabilities?.participating_components ??
-      subscriberCapabilities?.component_ids ?? [
-        'ue',
-        'gnb',
-        'amf',
-        'ausf',
-        'udm',
-        'smf',
-        'upf',
-      ]
-  const scope = [
-    'N2 / NGAP + NAS',
-    ...(includeSbi ? ['SBI / HTTP2'] : []),
-    'N4 / PFCP',
-    ...(includeUserPlane ? ['N3 / GTP-U', 'N6 / IP'] : []),
-  ]
   const identifierValid = validateIdentifier(identifierType, identifier)
   const maxDuration =
     capabilities?.quota?.max_duration_seconds ??
@@ -181,17 +150,15 @@ export function SubscriberTraceForm({
   return (
     <form
       onSubmit={submit}
-      className='grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]'
+      className='overflow-hidden rounded-lg border bg-card'
     >
-      <div className='space-y-4'>
-        <Card>
-          <CardHeader>
-            <CardTitle className='flex items-center gap-2'>
-              <UserRoundSearch className='size-5 text-primary' />
-              Suscriptor objetivo
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='grid gap-4 sm:grid-cols-2'>
+      <div className='flex items-center justify-between border-b px-5 py-3'>
+        <h2 className='text-sm font-semibold'>Nueva captura de suscriptor</h2>
+        <TraceFormHelp mode='subscriber' />
+      </div>
+      <fieldset disabled={isSubmitting} className='min-w-0 divide-y'>
+        <section className='px-5 py-5'>
+          <div className='grid gap-x-6 gap-y-4 sm:grid-cols-2'>
             <div className='space-y-2 sm:col-span-2'>
               <Label htmlFor='subscriber-task-name'>Nombre de la tarea</Label>
               <Input
@@ -212,7 +179,7 @@ export function SubscriberTraceForm({
                   setIdentifier('')
                 }}
               >
-                <SelectTrigger id='subscriber-id-type'>
+                <SelectTrigger className='w-full' id='subscriber-id-type'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -306,26 +273,19 @@ export function SubscriberTraceForm({
                 </p>
               )}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className='flex items-center gap-2'>
-              <Route className='size-5 text-primary' />
-              Procedimientos y alcance
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='space-y-5'>
-            <div className='grid gap-3 sm:grid-cols-2'>
+        <section className='px-5 py-5'>
+          <div className='space-y-4'>
+            <fieldset className='flex flex-wrap gap-x-6 gap-y-3'>
+              <legend className='mb-3 text-xs font-medium text-muted-foreground'>
+                Procedimientos
+              </legend>
               {procedureOptions.map((procedure) => (
                 <label
                   key={procedure.id}
-                  className={cn(
-                    'flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors',
-                    procedures.includes(procedure.id) &&
-                      'border-primary/40 bg-primary/5'
-                  )}
+                  className='flex cursor-pointer items-center gap-2'
                 >
                   <Checkbox
                     className='mt-0.5'
@@ -338,15 +298,10 @@ export function SubscriberTraceForm({
                     <span className='block text-sm font-medium'>
                       {procedure.label}
                     </span>
-                    {procedure.description && (
-                      <span className='mt-1 block text-xs text-muted-foreground'>
-                        {procedure.description}
-                      </span>
-                    )}
                   </span>
                 </label>
               ))}
-            </div>
+            </fieldset>
             {!procedures.length && (
               <p className='text-xs text-destructive'>
                 Seleccione al menos un procedimiento.
@@ -356,35 +311,32 @@ export function SubscriberTraceForm({
             <div className='grid gap-3 sm:grid-cols-3'>
               <ToggleOption
                 label='Plano de usuario'
-                description='Incluye N3 y N6 para correlacionar TEID e IP.'
                 checked={includeUserPlane}
                 disabled={subscriberCapabilities?.supports_user_plane === false}
                 onCheckedChange={setIncludeUserPlane}
               />
               <ToggleOption
                 label='Mensajes SBI'
-                description='Incluye AUSF, UDM y N11 AMF–SMF; el ruido de mantenimiento se oculta.'
                 checked={includeSbi}
                 disabled={subscriberCapabilities?.supports_sbi === false}
                 onCheckedChange={setIncludeSbi}
               />
               <ToggleOption
-                label='Disparar procedimiento'
-                description='Recomendado: reinicia el UE para capturar un Registration nuevo.'
+                label='Reiniciar UE al iniciar'
                 checked={effectiveAutoTrigger}
                 disabled={!autoTriggerAllowed}
                 onCheckedChange={setAutoTrigger}
               />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card>
-          <CardContent className='grid gap-4 pt-6 sm:grid-cols-2'>
+        <section className='px-5 py-5'>
+          <div className='grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
             <div className='space-y-2'>
               <Label htmlFor='subscriber-duration'>Duración</Label>
               <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger id='subscriber-duration'>
+                <SelectTrigger className='w-full' id='subscriber-duration'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -399,7 +351,7 @@ export function SubscriberTraceForm({
             <div className='space-y-2'>
               <Label htmlFor='subscriber-max-size'>Tamaño máximo</Label>
               <Select value={maxMegabytes} onValueChange={setMaxMegabytes}>
-                <SelectTrigger id='subscriber-max-size'>
+                <SelectTrigger className='w-full' id='subscriber-max-size'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -411,125 +363,61 @@ export function SubscriberTraceForm({
                 </SelectContent>
               </Select>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </section>
+      </fieldset>
 
-      <Card className='h-fit xl:sticky xl:top-20'>
-        <CardHeader>
-          <CardTitle className='flex items-center gap-2'>
-            <Fingerprint className='size-5 text-primary' />
-            Recorrido correlacionado
-          </CardTitle>
-        </CardHeader>
-        <CardContent className='space-y-5'>
-          <div>
-            <p className='text-xs font-medium text-muted-foreground'>
-              Funciones participantes
-            </p>
-            <div className='mt-2 flex flex-wrap gap-1.5'>
-              {participatingComponents.map((component) => (
-                <Badge key={component} variant='secondary'>
-                  {component.toUpperCase()}
-                </Badge>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className='text-xs font-medium text-muted-foreground'>
-              Interfaces capturadas
-            </p>
-            <div className='mt-2 flex flex-wrap gap-1.5'>
-              {scope.map((item) => (
-                <Badge key={item} variant='outline'>
-                  {item}
-                </Badge>
-              ))}
-            </div>
-          </div>
-          <div className='rounded-lg border bg-muted/30 p-3'>
-            <div className='flex items-center gap-2 text-sm font-medium'>
-              <Network className='size-4 text-primary' />
-              Cadena objetivo
-            </div>
-            <p className='mt-2 font-mono text-xs leading-6 text-muted-foreground'>
-              SUPI → NGAP IDs → PDU Session ID → PFCP SEID → GTP-U TEID → IP UE
-            </p>
-          </div>
-          {effectiveAutoTrigger ? (
-            <Alert>
-              <Info />
-              <AlertTitle>Captura con estímulo controlado</AlertTitle>
-              <AlertDescription>
-                El backend iniciará todas las capturas y luego provocará un
-                nuevo registro del UE para no perder los primeros mensajes.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <Alert>
-              <Activity />
-              <AlertTitle>Procedimiento manual requerido</AlertTitle>
-              <AlertDescription>
-                Inicie el registro o la sesión mientras la tarea esté
-                capturando. De lo contrario, el resultado puede ser “sin
-                tráfico”.
-              </AlertDescription>
-            </Alert>
-          )}
-          <div className='flex items-start gap-3 rounded-lg bg-muted/40 p-3'>
-            <ShieldCheck className='mt-0.5 size-4 shrink-0 text-emerald-500' />
-            <p className='text-xs text-muted-foreground'>
-              El IMSI/SUPI se enmascara en listados y auditoría. Los filtros y
-              comandos se resuelven exclusivamente en el backend.
-            </p>
-          </div>
-          <Button
-            className='w-full'
-            type='submit'
-            disabled={
-              !canCreate ||
-              !name.trim() ||
-              !identifierValid ||
-              !procedures.length ||
-              isSubmitting
-            }
-          >
-            {isSubmitting ? <Loader2 className='animate-spin' /> : <Play />}
-            Crear e iniciar Subscriber Trace
-          </Button>
-        </CardContent>
-      </Card>
+      <div className='flex flex-wrap items-center justify-end gap-3 border-t bg-muted/20 px-5 py-3'>
+        <p className='mr-auto text-xs text-muted-foreground'>
+          {effectiveAutoTrigger
+            ? 'Se reiniciará el UE al iniciar la captura.'
+            : 'Inicio del procedimiento: manual.'}
+        </p>
+        {!canCreate && (
+          <p className='mr-auto text-xs text-muted-foreground'>
+            Sin permiso para iniciar capturas.
+          </p>
+        )}
+        <Button
+          className='min-w-36'
+          type='submit'
+          disabled={
+            !canCreate ||
+            !name.trim() ||
+            !identifierValid ||
+            !procedures.length ||
+            isSubmitting
+          }
+        >
+          {isSubmitting ? <Loader2 className='animate-spin' /> : <Play />}
+          Iniciar captura
+        </Button>
+      </div>
     </form>
   )
 }
 
 function ToggleOption({
   label,
-  description,
   checked,
   disabled,
   onCheckedChange,
 }: {
   label: string
-  description: string
   checked: boolean
   disabled?: boolean
   onCheckedChange: (value: boolean) => void
 }) {
   return (
-    <div className='flex items-start justify-between gap-3 rounded-lg border p-3'>
-      <div>
-        <Label className='text-sm'>{label}</Label>
-        <p className='mt-1 text-xs leading-relaxed text-muted-foreground'>
-          {description}
-        </p>
-      </div>
+    <label className='flex items-center justify-between gap-3 rounded-md bg-muted/30 px-3 py-2.5'>
+      <span className='text-sm'>{label}</span>
       <Switch
+        aria-label={label}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
       />
-    </div>
+    </label>
   )
 }
 
@@ -553,14 +441,5 @@ function makeTaskName() {
 }
 
 function FormSkeleton() {
-  return (
-    <div className='grid animate-pulse gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,.65fr)]'>
-      <div className='space-y-4'>
-        <div className='h-64 rounded-xl bg-muted' />
-        <div className='h-80 rounded-xl bg-muted' />
-        <div className='h-28 rounded-xl bg-muted' />
-      </div>
-      <div className='h-[34rem] rounded-xl bg-muted' />
-    </div>
-  )
+  return <div className='h-80 animate-pulse rounded-lg border bg-muted/40' />
 }

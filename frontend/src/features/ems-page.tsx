@@ -1,43 +1,32 @@
 import type { ReactNode } from 'react'
-import { Header } from '@/components/layout/header'
 import { Main } from '@/components/layout/main'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { Search } from '@/components/search'
-import { ThemeSwitch } from '@/components/theme-switch'
+import { SidebarTrigger } from '@/components/ui/sidebar'
 
 export function EmsPage({
   title,
-  description,
   actions,
+  headerLeft,
   children,
 }: {
   title: string
-  description: string
+  description?: string
   actions?: ReactNode
+  headerLeft?: ReactNode
   children: ReactNode
 }) {
   return (
-    <>
-      <Header fixed>
-        <Search />
-        <div className='ms-auto flex items-center gap-3'>
-          <ThemeSwitch />
-          <ProfileDropdown />
+    <Main className='overflow-y-auto pb-10'>
+      <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
+        <div className='flex items-center gap-2.5'>
+          <SidebarTrigger variant='outline' className='size-8 md:hidden' />
+          <h1 className='text-xl font-semibold tracking-tight'>{title}</h1>
+          {headerLeft}
         </div>
-      </Header>
-      <Main>
-        <div className='mb-6 flex items-end justify-between gap-4'>
-          <div>
-            <p className='text-xs font-semibold tracking-[.18em] text-primary'>
-              EMS EDUCATIVO
-            </p>
-            <h1 className='text-3xl font-bold'>{title}</h1>
-            <p className='text-muted-foreground'>{description}</p>
-          </div>
-          {actions}
-        </div>
-        {children}
-      </Main>
-    </>
+        {actions && (
+          <div className='flex flex-wrap items-center gap-2'>{actions}</div>
+        )}
+      </div>
+      {children}
+    </Main>
   )
 }

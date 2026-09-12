@@ -228,8 +228,8 @@ export function TracesPage() {
 
   return (
     <EmsPage
-      title='Trace Task Center'
-      description='Capturas por interfaz y trazabilidad 5G extremo a extremo centrada en el suscriptor.'
+      title='Centro de trazas'
+      description=''
       actions={
         <div className='flex items-center gap-2'>
           {activeCount > 0 && (

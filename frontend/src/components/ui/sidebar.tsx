@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Slot } from '@radix-ui/react-slot'
 import { VariantProps, cva } from 'class-variance-authority'
-import { PanelLeftIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PanelLeftIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Button } from '@/components/ui/button'
@@ -277,32 +277,47 @@ function SidebarTrigger({
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<'button'>) {
-  const { toggleSidebar } = useSidebar()
+  const { toggleSidebar, state } = useSidebar()
 
   return (
     <button
       data-sidebar='rail'
       data-slot='sidebar-rail'
-      aria-label='Toggle Sidebar'
-      tabIndex={-1}
+      aria-label={state === 'expanded' ? 'Ocultar barra lateral' : 'Expandir barra lateral'}
+      tabIndex={0}
       onClick={toggleSidebar}
-      title='Toggle Sidebar'
+      title={state === 'expanded' ? 'Ocultar barra lateral' : 'Expandir barra lateral'}
       className={cn(
-        'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-inset-e-4 group-data-[side=right]:inset-s-0 after:absolute after:inset-y-0 after:inset-s-1/2 after:w-0.5 hover:after:bg-sidebar-border sm:flex',
-        'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
-        '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
+        'absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-inset-e-4 group-data-[side=right]:inset-s-0 after:absolute after:inset-y-0 after:inset-s-1/2 after:w-0.5 hover:after:bg-sidebar-border sm:flex items-center justify-center cursor-pointer group/rail',
+        'in-data-[side=left]:cursor-pointer in-data-[side=right]:cursor-pointer',
+        '[[data-side=left][data-state=collapsed]_&]:cursor-pointer [[data-side=right][data-state=collapsed]_&]:cursor-pointer',
         'group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:start-full hover:group-data-[collapsible=offcanvas]:bg-sidebar',
         '[[data-side=left][data-collapsible=offcanvas]_&]:-inset-e-2',
         '[[data-side=right][data-collapsible=offcanvas]_&]:-inset-s-2',
 
         // RTL support
         'rtl:translate-x-1/2',
-        'rtl:in-data-[side=left]:cursor-e-resize rtl:in-data-[side=right]:cursor-w-resize',
-        'rtl:[[data-side=left][data-state=collapsed]_&]:cursor-w-resize rtl:[[data-side=right][data-state=collapsed]_&]:cursor-e-resize',
+        'rtl:in-data-[side=left]:cursor-pointer rtl:in-data-[side=right]:cursor-pointer',
+        'rtl:[[data-side=left][data-state=collapsed]_&]:cursor-pointer rtl:[[data-side=right][data-state=collapsed]_&]:cursor-pointer',
         className
       )}
       {...props}
-    />
+    >
+      <span
+        className={cn(
+          'absolute top-5 flex size-5.5 items-center justify-center rounded-full',
+          'border border-sidebar-border bg-sidebar shadow-xs text-sidebar-foreground',
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:scale-110',
+          'transition-all duration-150'
+        )}
+      >
+        {state === 'expanded' ? (
+          <ChevronLeft className='size-3.5' />
+        ) : (
+          <ChevronRight className='size-3.5' />
+        )}
+      </span>
+    </button>
   )
 }
 
