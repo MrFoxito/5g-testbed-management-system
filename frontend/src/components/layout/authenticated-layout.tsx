@@ -1,10 +1,8 @@
 import { Outlet } from '@tanstack/react-router'
-import { getCookie } from '@/lib/cookies'
-import { cn } from '@/lib/utils'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
-import { AppSidebar } from '@/components/layout/app-sidebar'
+import { TopNavigation } from '@/components/layout/top-navigation'
 import { SkipToMain } from '@/components/skip-to-main'
 
 type AuthenticatedLayoutProps = {
@@ -12,30 +10,17 @@ type AuthenticatedLayoutProps = {
 }
 
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
-  const defaultOpen = getCookie('sidebar_state') !== 'false'
+  const scenario = useScenarioStore((state) => state.scenario)
   return (
     <SearchProvider>
       <LayoutProvider>
-        <SidebarProvider defaultOpen={defaultOpen}>
+        <div className='min-h-svh w-full min-w-0 bg-slate-50/60 dark:bg-background'>
           <SkipToMain />
-          <AppSidebar />
-          <SidebarInset
-            className={cn(
-              // Set content container, so we can use container queries
-              '@container/content',
-
-              // If layout is fixed, set the height
-              // to 100svh to prevent overflow
-              'has-data-[layout=fixed]:h-svh',
-
-              // If layout is fixed and sidebar is inset,
-              // set the height to 100svh - spacing (total margins) to prevent overflow
-              'peer-data-[variant=inset]:has-data-[layout=fixed]:h-[calc(100svh-(var(--spacing)*4))]'
-            )}
-          >
+          <TopNavigation />
+          <div key={scenario} className='@container/content min-w-0'>
             {children ?? <Outlet />}
-          </SidebarInset>
-        </SidebarProvider>
+          </div>
+        </div>
       </LayoutProvider>
     </SearchProvider>
   )

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Activity, Network, Radio, Server } from 'lucide-react'
 import { toast } from 'sonner'
+import { useScenarioStore } from '@/stores/scenario-store'
 import {
   api,
   type Experiment,
@@ -19,19 +20,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Main } from '@/components/layout/main'
 import { EmsTopology } from '@/features/topology/ems-topology'
 
 export function Dashboard() {
-  const [scenario, setScenario] = useState<'5g-sa' | '4g-epc'>('5g-sa')
+  const scenario = useScenarioStore((state) => state.scenario)
 
   const status = useQuery({
     queryKey: ['status', scenario],
@@ -133,291 +126,264 @@ export function Dashboard() {
 
   return (
     <Main className='overflow-y-auto pb-10'>
-      <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
-        <div className='flex flex-wrap items-center gap-2.5'>
-          <SidebarTrigger variant='outline' className='size-8 md:hidden' />
-          <h1 className='text-xl font-semibold tracking-tight'>Resumen</h1>
-          <div className='hidden h-4 w-px bg-border sm:block' />
-          <Select
-            value={scenario}
-            onValueChange={(val) => setScenario(val as '5g-sa' | '4g-epc')}
-          >
-            <SelectTrigger className='h-8 w-40 text-xs font-medium'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-              <SelectItem value='4g-epc'>4G EPC</SelectItem>
-            </SelectContent>
-          </Select>
-          <Badge
-            variant={
-              status.data?.state === 'running' ? 'default' : 'destructive'
-            }
-            className='px-2.5 py-1 text-xs font-medium tracking-wide uppercase'
-          >
-            ● {status.data?.state ?? 'conectando'}
-          </Badge>
-        </div>
+      <h1 className='sr-only'>Resumen</h1>
+      {/* METRICS ROW */}
+      <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+        <Metric
+          title='Funciones de red activas'
+          value={`${metrics.data?.telco?.active_nfs ?? active}/${metrics.data?.telco?.total_nfs ?? total}`}
+          subtitle='Estado del Core y RAN'
+          icon={Activity}
+        />
+        <Metric
+          title='Sesiones PDU / UE'
+          value={`${metrics.data?.telco?.pdu_sessions ?? 0} activa(s)`}
+          subtitle={`UE registrado: ${metrics.data?.telco?.ue_registered ? 'Sí' : 'No'}`}
+          icon={Radio}
+        />
+        <Metric
+          title='Tráfico Plano Usuario (N6)'
+          value={`${totalUserPlaneKbps.toFixed(1)} Kbps`}
+          subtitle={`Rx: ${ogstunTraffic?.rx_kbps ?? 0} | Tx: ${ogstunTraffic?.tx_kbps ?? 0} Kbps`}
+          icon={Network}
+        />
+        <Metric
+          title='Recursos VM (Ubuntu)'
+          value={`CPU ${metrics.data?.cpu_percent ?? 0}%`}
+          subtitle={`Memoria: ${metrics.data?.memory_percent ?? 0}%`}
+          icon={Server}
+        />
       </div>
 
-        {/* METRICS ROW */}
-        <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-          <Metric
-            title='Funciones de red activas'
-            value={`${metrics.data?.telco?.active_nfs ?? active}/${metrics.data?.telco?.total_nfs ?? total}`}
-            subtitle='Estado del Core y RAN'
-            icon={Activity}
-          />
-          <Metric
-            title='Sesiones PDU / UE'
-            value={`${metrics.data?.telco?.pdu_sessions ?? 0} activa(s)`}
-            subtitle={`UE registrado: ${metrics.data?.telco?.ue_registered ? 'Sí' : 'No'}`}
-            icon={Radio}
-          />
-          <Metric
-            title='Tráfico Plano Usuario (N6)'
-            value={`${totalUserPlaneKbps.toFixed(1)} Kbps`}
-            subtitle={`Rx: ${ogstunTraffic?.rx_kbps ?? 0} | Tx: ${ogstunTraffic?.tx_kbps ?? 0} Kbps`}
-            icon={Network}
-          />
-          <Metric
-            title='Recursos VM (Ubuntu)'
-            value={`CPU ${metrics.data?.cpu_percent ?? 0}%`}
-            subtitle={`Memoria: ${metrics.data?.memory_percent ?? 0}%`}
-            icon={Server}
-          />
-        </div>
+      {/* TOPOLOGY & LIVE TELEMETRY / ALARMS */}
+      <div className='mt-4 grid min-h-0 gap-4 lg:h-[480px] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'>
+        <Card className='flex h-[480px] min-h-0 min-w-0 flex-col lg:h-full'>
+          <CardHeader className='pb-2'>
+            <div className='flex items-center justify-between'>
+              <CardTitle>Topología en vivo</CardTitle>
+              <div className='flex items-center gap-2'>
+                <Badge
+                  variant='outline'
+                  className='font-mono text-xs text-muted-foreground'
+                >
+                  Host: {runtime.data?.hostname ?? 'ems-testbed'}
+                </Badge>
+                <Badge
+                  variant='outline'
+                  className='font-mono text-xs text-muted-foreground'
+                >
+                  Origen: {metrics.data?.source ?? 'ssh'}
+                </Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className='min-h-0 flex-1'>
+            <EmsTopology
+              components={status.data?.components ?? []}
+              alarms={alarmCenter.data?.items ?? []}
+            />
+          </CardContent>
+        </Card>
 
-        {/* TOPOLOGY & LIVE TELEMETRY / ALARMS */}
-        <div className='mt-4 grid min-h-0 gap-4 lg:h-[480px] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]'>
-          <Card className='flex h-[480px] min-h-0 min-w-0 flex-col lg:h-full'>
+        <div className='grid min-h-0 min-w-0 gap-4 lg:h-full lg:grid-rows-2'>
+          {/* Live Throughput Sparkline */}
+          <Card className='min-h-0 overflow-auto'>
+            <CardHeader className='pb-2'>
+              <CardTitle className='text-sm font-medium'>
+                Telemetría de Tráfico en Vivo
+              </CardTitle>
+              <CardDescription>
+                Rendimiento por interfaz telco en tiempo real
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ThroughputChart history={metrics.data?.history} />
+            </CardContent>
+          </Card>
+
+          {/* Alarms Panel */}
+          <Card className='flex min-h-0 flex-col overflow-hidden'>
             <CardHeader className='pb-2'>
               <div className='flex items-center justify-between'>
-                <CardTitle>Topología en vivo</CardTitle>
                 <div className='flex items-center gap-2'>
-                  <Badge
-                    variant='outline'
-                    className='font-mono text-xs text-muted-foreground'
+                  <CardTitle className='text-sm font-medium'>
+                    Alarmas Telco Activas
+                  </CardTitle>
+                  <Link
+                    to='/alarms'
+                    className='text-[11px] text-primary hover:underline'
                   >
-                    Host: {runtime.data?.hostname ?? 'ems-testbed'}
-                  </Badge>
+                    Ver todas →
+                  </Link>
+                </div>
+                <div className='flex items-center gap-1 font-mono text-[10px]'>
+                  {alarmCenter.data?.counts?.critical ? (
+                    <span className='rounded bg-red-600 px-1.5 py-0.5 font-bold text-white shadow-xs'>
+                      {alarmCenter.data.counts.critical} CRIT
+                    </span>
+                  ) : null}
+                  {alarmCenter.data?.counts?.major ? (
+                    <span className='rounded bg-amber-500 px-1.5 py-0.5 font-bold text-white shadow-xs'>
+                      {alarmCenter.data.counts.major} MAJ
+                    </span>
+                  ) : null}
                   <Badge
-                    variant='outline'
-                    className='font-mono text-xs text-muted-foreground'
+                    variant={
+                      alarmCenter.data?.total ? 'destructive' : 'secondary'
+                    }
                   >
-                    Origen: {metrics.data?.source ?? 'ssh'}
+                    {alarmCenter.data?.total ?? 0}
                   </Badge>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className='min-h-0 flex-1'>
-              <EmsTopology
-                components={status.data?.components ?? []}
-                alarms={alarmCenter.data?.items ?? []}
-              />
+            <CardContent className='min-h-0 flex-1 space-y-2 overflow-y-auto'>
+              {alarmCenter.data?.items?.length ? (
+                alarmCenter.data.items.map((alarm) => (
+                  <div
+                    key={alarm.id}
+                    className='rounded-lg border p-2.5 text-xs'
+                  >
+                    <div className='flex items-center justify-between'>
+                      <b className='font-semibold'>
+                        {alarm.network_function || alarm.component}
+                      </b>
+                      <Badge
+                        variant={
+                          alarm.severity === 'critical'
+                            ? 'destructive'
+                            : 'secondary'
+                        }
+                        className={`font-mono text-[9px] uppercase ${alarm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
+                      >
+                        {alarm.severity}
+                      </Badge>
+                    </div>
+                    <p className='mt-1 text-muted-foreground'>
+                      {alarm.message}
+                    </p>
+                    {alarm.evidence && (
+                      <p className='mt-0.5 font-mono text-[10px] text-muted-foreground/80'>
+                        {alarm.evidence}
+                      </p>
+                    )}
+                    {alarm.procedures && alarm.procedures.length > 0 && (
+                      <p className='mt-0.5 text-[10px] text-primary/80'>
+                        Procedimiento: {alarm.procedures.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className='grid h-24 place-items-center text-xs text-muted-foreground'>
+                  Sin incidentes activos · Testbed saludable
+                </div>
+              )}
             </CardContent>
           </Card>
-
-          <div className='grid min-h-0 min-w-0 gap-4 lg:h-full lg:grid-rows-2'>
-            {/* Live Throughput Sparkline */}
-            <Card className='min-h-0 overflow-auto'>
-              <CardHeader className='pb-2'>
-                <CardTitle className='text-sm font-medium'>
-                  Telemetría de Tráfico en Vivo
-                </CardTitle>
-                <CardDescription>
-                  Rendimiento por interfaz telco en tiempo real
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ThroughputChart history={metrics.data?.history} />
-              </CardContent>
-            </Card>
-
-            {/* Alarms Panel */}
-            <Card className='flex min-h-0 flex-col overflow-hidden'>
-              <CardHeader className='pb-2'>
-                <div className='flex items-center justify-between'>
-                  <div className='flex items-center gap-2'>
-                    <CardTitle className='text-sm font-medium'>
-                      Alarmas Telco Activas
-                    </CardTitle>
-                    <Link
-                      to='/alarms'
-                      className='text-[11px] text-primary hover:underline'
-                    >
-                      Ver todas →
-                    </Link>
-                  </div>
-                  <div className='flex items-center gap-1 font-mono text-[10px]'>
-                    {alarmCenter.data?.counts?.critical ? (
-                      <span className='rounded bg-red-600 px-1.5 py-0.5 font-bold text-white shadow-xs'>
-                        {alarmCenter.data.counts.critical} CRIT
-                      </span>
-                    ) : null}
-                    {alarmCenter.data?.counts?.major ? (
-                      <span className='rounded bg-amber-500 px-1.5 py-0.5 font-bold text-white shadow-xs'>
-                        {alarmCenter.data.counts.major} MAJ
-                      </span>
-                    ) : null}
-                    <Badge
-                      variant={
-                        alarmCenter.data?.total ? 'destructive' : 'secondary'
-                      }
-                    >
-                      {alarmCenter.data?.total ?? 0}
-                    </Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className='min-h-0 flex-1 space-y-2 overflow-y-auto'>
-                {alarmCenter.data?.items?.length ? (
-                  alarmCenter.data.items.map((alarm) => (
-                    <div
-                      key={alarm.id}
-                      className='rounded-lg border p-2.5 text-xs'
-                    >
-                      <div className='flex items-center justify-between'>
-                        <b className='font-semibold'>
-                          {alarm.network_function || alarm.component}
-                        </b>
-                        <Badge
-                          variant={
-                            alarm.severity === 'critical'
-                              ? 'destructive'
-                              : 'secondary'
-                          }
-                          className={`font-mono text-[9px] uppercase ${alarm.severity === 'major' ? 'bg-amber-500 text-white' : ''}`}
-                        >
-                          {alarm.severity}
-                        </Badge>
-                      </div>
-                      <p className='mt-1 text-muted-foreground'>
-                        {alarm.message}
-                      </p>
-                      {alarm.evidence && (
-                        <p className='mt-0.5 font-mono text-[10px] text-muted-foreground/80'>
-                          {alarm.evidence}
-                        </p>
-                      )}
-                      {alarm.procedures && alarm.procedures.length > 0 && (
-                        <p className='mt-0.5 text-[10px] text-primary/80'>
-                          Procedimiento: {alarm.procedures.join(', ')}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <div className='grid h-24 place-items-center text-xs text-muted-foreground'>
-                    Sin incidentes activos · Testbed saludable
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
         </div>
+      </div>
 
-        <Card className='mt-4 gap-0 overflow-hidden py-0 shadow-none'>
-          <CardHeader className='border-b px-4 py-3'>
-            <CardTitle className='text-sm font-semibold'>
-              Laboratorio de fallas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className='p-0'>
-            <div className='overflow-x-auto'>
-              <table className='w-full text-left text-sm'>
-                <thead className='border-b bg-muted/30 text-xs text-muted-foreground'>
-                  <tr>
-                    <th className='px-4 py-2 font-medium'>Prueba</th>
-                    <th className='px-4 py-2 font-medium'>Estado</th>
-                    <th className='px-4 py-2 font-medium'>Tiempo activo</th>
-                    <th className='px-4 py-2 text-right font-medium'>Acción</th>
-                  </tr>
-                </thead>
-                <tbody className='divide-y'>
-                  {experiments.data?.map((exp) => {
-                    const isInjected = exp.state?.status === 'injected'
-                    const isWorking = injectingId === exp.id
-                    return (
-                      <tr
-                        key={exp.id}
-                        className={isInjected ? 'bg-destructive/5' : ''}
-                      >
-                        <td className='px-4 py-3'>
-                          <details className='max-w-3xl'>
-                            <summary className='cursor-pointer font-medium'>
-                              {exp.title}
-                            </summary>
-                            <div className='mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground'>
-                              <p>{exp.description}</p>
-                              <p>
-                                Interfaces: {exp.interfaces.join(', ') || '—'}
-                              </p>
-                              <p>
-                                Objetivo de detección: {exp.expected_detection}
-                              </p>
-                            </div>
-                          </details>
-                        </td>
-                        <td className='px-4 py-3 whitespace-nowrap'>
-                          <span
-                            className={
-                              isInjected
-                                ? 'font-medium text-destructive'
-                                : 'text-muted-foreground'
-                            }
-                          >
-                            {isInjected ? 'Falla activa' : 'Nominal'}
-                          </span>
-                        </td>
-                        <td className='px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground'>
-                          {isInjected
-                            ? `${exp.state?.elapsed_seconds ?? 0} s`
-                            : '—'}
-                        </td>
-                        <td className='px-4 py-3 text-right'>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            className='min-w-28 text-xs'
-                            disabled={injectingId !== null}
-                            onClick={() => handleExperimentToggle(exp)}
-                          >
-                            {isWorking
-                              ? isInjected
-                                ? 'Restaurando…'
-                                : 'Inyectando…'
-                              : isInjected
-                                ? 'Restaurar'
-                                : 'Inyectar falla'}
-                          </Button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {(experiments.isLoading ||
-                    experiments.isError ||
-                    !experiments.data?.length) && (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className='px-4 py-6 text-center text-sm text-muted-foreground'
-                      >
-                        {experiments.isLoading
-                          ? 'Cargando pruebas…'
-                          : experiments.isError
-                            ? 'No se pudo cargar el catálogo de pruebas.'
-                            : 'No hay pruebas disponibles para este escenario.'}
+      <Card className='mt-4 gap-0 overflow-hidden py-0 shadow-none'>
+        <CardHeader className='border-b px-4 py-3'>
+          <CardTitle className='text-sm font-semibold'>
+            Laboratorio de fallas
+          </CardTitle>
+        </CardHeader>
+        <CardContent className='p-0'>
+          <div className='overflow-x-auto'>
+            <table className='w-full text-left text-sm'>
+              <thead className='border-b bg-muted/30 text-xs text-muted-foreground'>
+                <tr>
+                  <th className='px-4 py-2 font-medium'>Prueba</th>
+                  <th className='px-4 py-2 font-medium'>Estado</th>
+                  <th className='px-4 py-2 font-medium'>Tiempo activo</th>
+                  <th className='px-4 py-2 text-right font-medium'>Acción</th>
+                </tr>
+              </thead>
+              <tbody className='divide-y'>
+                {experiments.data?.map((exp) => {
+                  const isInjected = exp.state?.status === 'injected'
+                  const isWorking = injectingId === exp.id
+                  return (
+                    <tr
+                      key={exp.id}
+                      className={isInjected ? 'bg-destructive/5' : ''}
+                    >
+                      <td className='px-4 py-3'>
+                        <details className='max-w-3xl'>
+                          <summary className='cursor-pointer font-medium'>
+                            {exp.title}
+                          </summary>
+                          <div className='mt-2 space-y-1 text-xs leading-relaxed text-muted-foreground'>
+                            <p>{exp.description}</p>
+                            <p>
+                              Interfaces: {exp.interfaces.join(', ') || '—'}
+                            </p>
+                            <p>
+                              Objetivo de detección: {exp.expected_detection}
+                            </p>
+                          </div>
+                        </details>
+                      </td>
+                      <td className='px-4 py-3 whitespace-nowrap'>
+                        <span
+                          className={
+                            isInjected
+                              ? 'font-medium text-destructive'
+                              : 'text-muted-foreground'
+                          }
+                        >
+                          {isInjected ? 'Falla activa' : 'Nominal'}
+                        </span>
+                      </td>
+                      <td className='px-4 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground'>
+                        {isInjected
+                          ? `${exp.state?.elapsed_seconds ?? 0} s`
+                          : '—'}
+                      </td>
+                      <td className='px-4 py-3 text-right'>
+                        <Button
+                          size='sm'
+                          variant='outline'
+                          className='min-w-28 text-xs'
+                          disabled={injectingId !== null}
+                          onClick={() => handleExperimentToggle(exp)}
+                        >
+                          {isWorking
+                            ? isInjected
+                              ? 'Restaurando…'
+                              : 'Inyectando…'
+                            : isInjected
+                              ? 'Restaurar'
+                              : 'Inyectar falla'}
+                        </Button>
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      </Main>
+                  )
+                })}
+                {(experiments.isLoading ||
+                  experiments.isError ||
+                  !experiments.data?.length) && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className='px-4 py-6 text-center text-sm text-muted-foreground'
+                    >
+                      {experiments.isLoading
+                        ? 'Cargando pruebas…'
+                        : experiments.isError
+                          ? 'No se pudo cargar el catálogo de pruebas.'
+                          : 'No hay pruebas disponibles para este escenario.'}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </Main>
   )
 }
 

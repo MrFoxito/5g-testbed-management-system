@@ -17,7 +17,7 @@ export const sidebarData: SidebarData = {
     email: 'PUCP · TEL142',
     avatar: '/images/ems-network.svg',
   },
-  teams: [{ name: 'EMS Educativo', logo: '/images/ems-network.svg', plan: 'Open5GS · srsRAN' }],
+  teams: [{ name: 'MAEstro', logo: '/images/ems-network.svg', plan: 'Open5GS · srsRAN' }],
   navGroups: [
     {
       title: 'Operación',

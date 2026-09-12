@@ -2,10 +2,17 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileSpreadsheet, FileText, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
 import {
   Table,
   TableBody,
@@ -26,6 +33,7 @@ type Event = {
 }
 
 export function AuditPage() {
+  const scenario = useScenarioStore((state) => state.scenario)
   const [exporting, setExporting] = useState<string | null>(null)
   const query = useQuery({
     queryKey: ['audit'],
@@ -35,16 +43,18 @@ export function AuditPage() {
   const exportEvidence = async (format: 'json' | 'csv') => {
     setExporting(format)
     try {
-      const response = await api.get(`/audit/evidence/5g-sa/${format}`, {
+      const response = await api.get(`/audit/evidence/${scenario}/${format}`, {
         responseType: 'blob',
       })
       const url = URL.createObjectURL(response.data)
       const link = document.createElement('a')
       link.href = url
-      link.download = `evidencia_5g-sa_${new Date().toISOString().slice(0, 10)}.${format}`
+      link.download = `evidencia_${scenario}_${new Date().toISOString().slice(0, 10)}.${format}`
       link.click()
       URL.revokeObjectURL(url)
-      toast.success(`Paquete de evidencia descargado en ${format.toUpperCase()}`)
+      toast.success(
+        `Paquete de evidencia descargado en ${format.toUpperCase()}`
+      )
     } catch {
       toast.error('No se pudo generar el reporte de evidencia')
     } finally {
@@ -57,15 +67,20 @@ export function AuditPage() {
       title='Auditoría y Centro de Evidencia'
       description='Trazabilidad de operaciones privilegiadas y generación de reportes consolidados para el informe de laboratorio.'
     >
-      <div className='grid gap-4 md:grid-cols-3 mb-4'>
+      <div className='mb-4 grid gap-4 md:grid-cols-3'>
         <Card className='md:col-span-2'>
           <CardHeader className='pb-3'>
             <div className='flex items-center gap-2'>
               <ShieldCheck className='h-5 w-5 text-emerald-500' />
-              <CardTitle className='text-base'>Paquete Consolidado de Evidencia (Informe de Tesis/Laboratorio)</CardTitle>
+              <CardTitle className='text-base'>
+                Paquete Consolidado de Evidencia (Informe de Tesis/Laboratorio)
+              </CardTitle>
             </div>
             <CardDescription>
-              Exporta en un solo archivo el inventario de funciones de red, estado de servicios, interfaces y sockets del host, resultados de validación telco 3GPP, alarmas activas, metadatos de capturas PCAP y trazabilidad de comandos.
+              Exporta en un solo archivo el inventario de funciones de red,
+              estado de servicios, interfaces y sockets del host, resultados de
+              validación telco 3GPP, alarmas activas, metadatos de capturas PCAP
+              y trazabilidad de comandos.
             </CardDescription>
           </CardHeader>
           <CardContent className='flex flex-wrap items-center gap-3 pt-0'>
@@ -77,7 +92,9 @@ export function AuditPage() {
               className='gap-2'
             >
               <FileText className='h-4 w-4' />
-              {exporting === 'json' ? 'Generando JSON...' : 'Descargar Evidencia (.json)'}
+              {exporting === 'json'
+                ? 'Generando JSON...'
+                : 'Descargar Evidencia (.json)'}
             </Button>
             <Button
               variant='outline'
@@ -87,20 +104,29 @@ export function AuditPage() {
               className='gap-2'
             >
               <FileSpreadsheet className='h-4 w-4' />
-              {exporting === 'csv' ? 'Generando CSV...' : 'Descargar Resumen (.csv)'}
+              {exporting === 'csv'
+                ? 'Generando CSV...'
+                : 'Descargar Resumen (.csv)'}
             </Button>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className='pb-2'>
-            <CardTitle className='text-sm font-medium'>Protección de Privacidad</CardTitle>
+            <CardTitle className='text-sm font-medium'>
+              Protección de Privacidad
+            </CardTitle>
           </CardHeader>
-          <CardContent className='text-xs text-muted-foreground space-y-2'>
+          <CardContent className='space-y-2 text-xs text-muted-foreground'>
             <p>
-              Ningún secreto ni clave criptográfica (Ki, OPc, contraseñas de MongoDB o tokens) se almacena en el registro de auditoría ni se incluye en los paquetes exportados.
+              Ningún secreto ni clave criptográfica (Ki, OPc, contraseñas de
+              MongoDB o tokens) se almacena en el registro de auditoría ni se
+              incluye en los paquetes exportados.
             </p>
-            <Badge variant='outline' className='text-[10px] text-emerald-600 dark:text-emerald-400'>
+            <Badge
+              variant='outline'
+              className='text-[10px] text-emerald-600 dark:text-emerald-400'
+            >
               ✓ Conforme a criterios de seguridad
             </Badge>
           </CardContent>
@@ -131,7 +157,9 @@ export function AuditPage() {
                   <TableCell className='text-xs'>
                     {new Date(x.created_at).toLocaleString()}
                   </TableCell>
-                  <TableCell className='font-medium text-xs'>{x.username}</TableCell>
+                  <TableCell className='text-xs font-medium'>
+                    {x.username}
+                  </TableCell>
                   <TableCell>
                     <Badge variant='outline' className='text-[10px] capitalize'>
                       {x.role}
@@ -142,7 +170,9 @@ export function AuditPage() {
                   </TableCell>
                   <TableCell>
                     <Badge
-                      variant={x.result === 'success' ? 'default' : 'destructive'}
+                      variant={
+                        x.result === 'success' ? 'default' : 'destructive'
+                      }
                       className='text-[10px]'
                     >
                       {x.result}

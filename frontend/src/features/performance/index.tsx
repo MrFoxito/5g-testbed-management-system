@@ -20,6 +20,7 @@ import {
   UserRound,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { api, apiErrorMessage } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -37,6 +38,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,11 +50,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmsPage } from '@/features/ems-page'
 import { PerformanceChart } from './performance-chart'
 import { QueryWizard } from './query-wizard'
 import { ReportDialog } from './report-dialog'
-import { supportsObject } from './types'
+import {
+  supportsObject,
+  selectMeasurementObject,
+  isOperationalCounter,
+} from './types'
 import type {
   Aggregation,
   KpiFolder,
@@ -67,7 +74,7 @@ const DEFAULT_COUNTERS = ['host.cpu.percent', 'host.memory.percent']
 
 export function PerformancePage() {
   const queryClient = useQueryClient()
-  const [scenario, setScenario] = useState<'5g-sa' | '4g-epc'>('5g-sa')
+  const scenario = useScenarioStore((state) => state.scenario)
   const [objectIds, setObjectIds] = useState<string[] | null>(null)
   const [activeTitle, setActiveTitle] = useState('Recursos del testbed')
   const [counterSearch, setCounterSearch] = useState('')
@@ -79,6 +86,7 @@ export function PerformancePage() {
   const [aggregation, setAggregation] = useState<Aggregation>('avg')
   const [search, setSearch] = useState('')
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [counterKind, setCounterKind] = useState('service')
   const [saveOpen, setSaveOpen] = useState(false)
   const [folderOpen, setFolderOpen] = useState(false)
   const [queryName, setQueryName] = useState('')
@@ -183,7 +191,12 @@ export function PerformancePage() {
   })
 
   const applyDraft = (next: KpiQueryDraft) => {
-    setScenario(next.scenario_id)
+    if (next.scenario_id !== scenario) {
+      toast.info(
+        'Selecciona el escenario de esta consulta en la barra superior antes de abrirla.'
+      )
+      return
+    }
     setObjectIds(next.object_ids)
     setCounterIds(next.counter_ids)
     setRangeKey(next.range_key)
@@ -192,6 +205,12 @@ export function PerformancePage() {
   }
 
   const loadSaved = (item: SavedKpiQuery) => {
+    if (item.scenario_id !== scenario) {
+      toast.info(
+        'Selecciona el escenario de esta consulta en la barra superior antes de abrirla.'
+      )
+      return
+    }
     setActiveTitle(item.name)
     applyDraft({
       scenario_id: item.scenario_id as '5g-sa' | '4g-epc',
@@ -268,15 +287,17 @@ export function PerformancePage() {
 
   const toggleObject = (id: string) => {
     const current = effectiveObjects
-    const next = current.includes(id)
-      ? current.filter((item) => item !== id)
-      : [...current, id]
+    const next = selectMeasurementObject(current, id)
     setObjectIds(next)
+    setCounterKind('service')
     setActiveTitle('Consulta personalizada')
     const counters = catalog.data?.counters ?? []
     const kept = counterIds.filter((counterId) =>
       counters.some(
-        (c) => c.id === counterId && next.some((obj) => supportsObject(c, obj))
+        (c) =>
+          c.id === counterId &&
+          next.length > 0 &&
+          next.every((obj) => supportsObject(c, obj))
       )
     )
     setCounterIds(kept)
@@ -294,7 +315,12 @@ export function PerformancePage() {
   const compatibleCounters =
     catalog.data?.counters.filter(
       (counter) =>
-        effectiveObjects.some((id) => supportsObject(counter, id)) &&
+        effectiveObjects.length > 0 &&
+        effectiveObjects.every((id) => supportsObject(counter, id)) &&
+        (!effectiveObjects.some((id) => id.startsWith('nf:')) ||
+          (counterKind === 'operations'
+            ? isOperationalCounter(counter)
+            : !isOperationalCounter(counter))) &&
         `${counter.label} ${counter.category} ${counter.native_name ?? ''}`
           .toLowerCase()
           .includes(counterSearch.toLowerCase())
@@ -307,35 +333,33 @@ export function PerformancePage() {
     ...new Set(compatibleCounters.map((item) => item.category)),
   ]
 
+  if (wizardOpen && catalog.data) {
+    return (
+      <EmsPage title='Nueva consulta' description=''>
+        <QueryWizard
+          onOpenChange={setWizardOpen}
+          objects={catalog.data.objects}
+          counters={catalog.data.counters}
+          initial={draft}
+          onApply={(next) => {
+            applyDraft(next)
+            setActiveTitle('Consulta personalizada')
+          }}
+        />
+      </EmsPage>
+    )
+  }
+
   return (
     <EmsPage
-      title='Performance Studio'
+      title='Performance'
       description='Contadores históricos, consultas reutilizables y KPIs del testbed 4G/5G.'
-      actions={
-        <Select
-          value={scenario}
-          onValueChange={(value) => {
-            setScenario(value as '5g-sa' | '4g-epc')
-            setObjectIds(null)
-            setCounterIds(DEFAULT_COUNTERS)
-            setActiveTitle('Recursos del testbed')
-          }}
-        >
-          <SelectTrigger className='w-44'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-            <SelectItem value='4g-epc'>4G EPC</SelectItem>
-          </SelectContent>
-        </Select>
-      }
     >
-      <div className='mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3'>
+      <div className='mb-3 flex flex-wrap items-center gap-2'>
         <Button variant='outline' onClick={() => setLibraryOpen(!libraryOpen)}>
           <Folder /> Biblioteca
         </Button>
-        <Button onClick={() => setWizardOpen(true)}>
+        <Button disabled={!catalog.data} onClick={() => setWizardOpen(true)}>
           <BarChart3 /> Nueva consulta
         </Button>
         <Button
@@ -359,30 +383,63 @@ export function PerformancePage() {
           <RefreshCw className={result.isFetching ? 'animate-spin' : ''} />{' '}
           Actualizar
         </Button>
-        <div className='ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
-          <Badge
-            variant={
-              catalog.data?.collector.last_run?.status === 'success'
-                ? 'default'
-                : 'secondary'
-            }
-          >
-            <span className='mr-1.5 size-1.5 rounded-full bg-current' />
-            Recolector {catalog.data?.collector.last_run?.status ?? 'iniciando'}
-          </Badge>
-          <span>{catalog.data?.collector.stored_samples ?? 0} muestras</span>
-          <span>cada {catalog.data?.collector.interval_seconds ?? 10}s</span>
-          <span>
-            retención {catalog.data?.collector.retention_days ?? 30} días
+        <div className='ml-auto flex items-center gap-2'>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant='ghost' size='sm'>
+                Referencia
+              </Button>
+            </DialogTrigger>
+            <DialogContent className='max-h-[85vh] overflow-y-auto sm:max-w-lg'>
+              <DialogHeader>
+                <DialogTitle>Referencia de Performance</DialogTitle>
+                <DialogDescription>
+                  Consulta histórica y estado del recolector.
+                </DialogDescription>
+              </DialogHeader>
+              <dl className='grid grid-cols-2 gap-3 text-sm'>
+                <dt className='text-muted-foreground'>Recolector</dt>
+                <dd>
+                  {catalog.data?.collector.last_run?.status ??
+                    'Sin información'}
+                </dd>
+                <dt className='text-muted-foreground'>Muestras almacenadas</dt>
+                <dd>{catalog.data?.collector.stored_samples ?? '—'}</dd>
+                <dt className='text-muted-foreground'>Intervalo</dt>
+                <dd>{catalog.data?.collector.interval_seconds ?? '—'} s</dd>
+                <dt className='text-muted-foreground'>Retención</dt>
+                <dd>{catalog.data?.collector.retention_days ?? '—'} días</dd>
+              </dl>
+              <div className='space-y-3 border-t pt-4 text-sm text-muted-foreground'>
+                <p>
+                  Selecciona objetos y después contadores compatibles. Elegir
+                  una NF no selecciona sus KPIs automáticamente.
+                </p>
+                <p>
+                  Los acumulados muestran la última lectura de cada intervalo.
+                  Las tasas nativas usan deltas y omiten reinicios. Una NF
+                  compartida mide el proceso completo.
+                </p>
+                <p>
+                  Las series sin muestras no se sustituyen por cero. El origen,
+                  tipo y última muestra de cada contador están disponibles al
+                  mantener el cursor sobre él.
+                </p>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <span className='text-xs text-muted-foreground' role='status'>
+            Recolector:{' '}
+            {catalog.data?.collector.last_run?.status ?? 'iniciando'}
           </span>
         </div>
       </div>
 
       <div
-        className={`grid min-h-[670px] gap-3 ${libraryOpen ? 'xl:grid-cols-[220px_minmax(0,1fr)_300px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}
+        className={`grid items-stretch gap-3 ${libraryOpen ? 'xl:grid-cols-[220px_minmax(0,1fr)_300px]' : 'xl:grid-cols-[minmax(0,1fr)_320px]'}`}
       >
         {libraryOpen && (
-          <Card className='overflow-hidden py-0'>
+          <Card className='gap-0 overflow-hidden py-0 shadow-none'>
             <CardHeader className='border-b px-4 py-4'>
               <div className='flex items-center justify-between'>
                 <CardTitle className='text-base'>Biblioteca KPI</CardTitle>
@@ -405,7 +462,7 @@ export function PerformancePage() {
                 />
               </div>
             </CardHeader>
-            <ScrollArea className='h-[590px]'>
+            <ScrollArea className='h-[480px]'>
               <CardContent className='space-y-2 p-3'>
                 <LibrarySection title='Plantillas EMS' icon={Gauge}>
                   <PresetItem
@@ -424,25 +481,6 @@ export function PerformancePage() {
                     label='Throughput por interfaz'
                     onClick={() => loadTelcoPreset('throughput')}
                   />
-                </LibrarySection>
-                <LibrarySection title='Funciones de red' icon={Server}>
-                  {catalog.data?.objects
-                    .filter((o) => o.type === 'nf')
-                    .map((o) => (
-                      <PresetItem
-                        key={o.id}
-                        label={`${o.label} · ${o.counter_count ?? 1}`}
-                        onClick={() => {
-                          setActiveTitle(`${o.label} · Contadores de la NF`)
-                          setCounterSearch('')
-                          applyDraft({
-                            ...draft,
-                            object_ids: [o.id],
-                            counter_ids: [],
-                          })
-                        }}
-                      />
-                    ))}
                 </LibrarySection>
                 <LibrarySection title='Mis consultas' icon={UserRound}>
                   <QueryTree
@@ -478,8 +516,7 @@ export function PerformancePage() {
                 </LibrarySection>
                 {!savedQueries.data?.length && (
                   <div className='rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground'>
-                    Cree una consulta y guárdela en una carpeta personal o
-                    compartida.
+                    Sin consultas guardadas.
                   </div>
                 )}
               </CardContent>
@@ -487,18 +524,13 @@ export function PerformancePage() {
           </Card>
         )}
 
-        <Card className='min-w-0 py-0'>
-          <CardHeader className='border-b px-5 py-4'>
+        <Card className='min-w-0 gap-0 py-0 shadow-none'>
+          <CardHeader className='border-b px-4 py-3'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <div>
                 <CardTitle className='flex items-center gap-2 text-base'>
-                  <LineChartIcon className='size-5 text-primary' />{' '}
                   {activeTitle}
                 </CardTitle>
-                <p className='mt-1 text-xs text-muted-foreground'>
-                  {effectiveObjects.length} objetos · {counterIds.length}{' '}
-                  contadores · últimas {rangeKey}
-                </p>
               </div>
               <div className='flex gap-2'>
                 <Select
@@ -539,7 +571,7 @@ export function PerformancePage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className='p-5'>
+          <CardContent className='p-4'>
             {!effectiveObjects.length || !counterIds.length ? (
               <div className='flex h-[440px] items-center justify-center rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground'>
                 Seleccione al menos un objeto y un contador compatible en el
@@ -561,163 +593,157 @@ export function PerformancePage() {
                 periodo. No se sustituyen datos ausentes por cero.
               </p>
             )}
-            <p className='mt-3 text-xs text-muted-foreground'>
-              Los acumulados muestran la última lectura de cada intervalo. Las
-              tasas nativas usan deltas y omiten reinicios. Una NF compartida
-              mide el proceso completo.
-            </p>
-            <div className='mt-4 grid gap-3 sm:grid-cols-3'>
-              <MetricSummary
-                label='Muestras consultadas'
-                value={String(result.data?.sample_count ?? 0)}
-                icon={Database}
-              />
-              <MetricSummary
-                label='Series resultantes'
-                value={String(result.data?.series.length ?? 0)}
-                icon={LineChartIcon}
-              />
-              <MetricSummary
-                label='Resolución'
-                value={`${granularity}s`}
-                icon={Gauge}
-              />
+            <div className='mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t pt-3 text-xs text-muted-foreground'>
+              <span>{result.data?.sample_count ?? 0} muestras</span>
+              <span>{result.data?.series.length ?? 0} series</span>
+              <span>Resolución: {granularity}s</span>
             </div>
           </CardContent>
         </Card>
 
-        <Card className='overflow-hidden py-0'>
-          <CardHeader className='border-b px-4 py-4'>
-            <CardTitle className='text-sm'>
-              Objetos{' '}
-              <span className='text-muted-foreground'>
-                / {effectiveObjects.length} seleccionados
-              </span>
-            </CardTitle>
-            <Input
-              value={objectSearch}
-              onChange={(e) => setObjectSearch(e.target.value)}
-              placeholder='Buscar nodo o interfaz'
-              aria-label='Buscar objetos'
-            />
-          </CardHeader>
-          <ScrollArea className='h-[250px]'>
-            <CardContent className='space-y-2 p-2'>
-              {objectGroups.map((group) => (
-                <SelectorGroup
-                  key={group}
-                  title={group}
-                  icon={group === 'Testbed' ? Server : Network}
-                >
-                  {catalog.data?.objects
-                    .filter(
-                      (item) =>
-                        item.group === group &&
-                        item.label
-                          .toLowerCase()
-                          .includes(objectSearch.toLowerCase())
-                    )
-                    .map((item) => (
-                      <label
-                        key={item.id}
-                        className='flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-muted'
-                      >
-                        <Checkbox
-                          checked={effectiveObjects.includes(item.id)}
-                          onCheckedChange={() => toggleObject(item.id)}
-                        />
-                        <span className='min-w-0 flex-1 truncate text-sm'>
-                          {item.label}
-                        </span>
-                        {item.counter_count && (
-                          <span className='text-[10px] text-muted-foreground'>
-                            {item.counter_count}
-                          </span>
-                        )}
-                        {item.status && (
-                          <span
-                            className={`size-2 rounded-full ${item.status === 'running' || item.status === 'UP' ? 'bg-emerald-500' : 'bg-muted-foreground'}`}
-                          />
-                        )}
-                      </label>
-                    ))}
-                </SelectorGroup>
-              ))}
-            </CardContent>
-          </ScrollArea>
-          <CardHeader className='border-y bg-muted/20 px-4 py-3'>
-            <CardTitle className='text-sm'>
-              Contadores{' '}
-              <span className='text-muted-foreground'>
-                / {counterIds.length} de 12
-              </span>
-            </CardTitle>
-            <Input
-              value={counterSearch}
-              onChange={(e) => setCounterSearch(e.target.value)}
-              placeholder='Buscar contador, causa, DNN…'
-              aria-label='Buscar contadores'
-            />
-            <p className='text-[11px] text-muted-foreground'>
-              {compatibleCounters.length} compatibles. Solo se ofrecen métricas
-              observadas; no se inventan contadores del fabricante.
-            </p>
-          </CardHeader>
-          <ScrollArea className='h-[370px]'>
-            <CardContent className='space-y-3 p-2'>
-              {counterGroups.map((group) => (
-                <SelectorGroup key={group} title={group} icon={Database}>
-                  {compatibleCounters
-                    .filter((item) => item.category === group)
-                    .map((item) => (
-                      <label
-                        key={item.id}
-                        title={`${item.description ?? item.label}${item.native_name ? '\n' + item.native_name : ''}${item.last_seen ? '\nÚltima muestra: ' + new Date(item.last_seen).toLocaleString() : ''}`}
-                        className='flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted'
-                      >
-                        <Checkbox
-                          className='mt-0.5'
-                          checked={counterIds.includes(item.id)}
-                          disabled={
-                            !counterIds.includes(item.id) &&
-                            counterIds.length >= 12
-                          }
-                          onCheckedChange={() => toggleCounter(item.id)}
-                        />
-                        <span className='min-w-0 flex-1'>
-                          <span className='block text-sm'>{item.label}</span>
-                          <span className='text-xs text-muted-foreground'>
-                            {item.source} ·{' '}
-                            {item.kind === 'counter'
-                              ? 'acumulado'
-                              : 'instantáneo'}
-                          </span>
-                        </span>
-                        <Badge variant='secondary'>{item.unit}</Badge>
-                      </label>
-                    ))}
-                </SelectorGroup>
-              ))}
-              {!compatibleCounters.length && (
-                <p className='rounded-md border border-dashed p-4 text-sm text-muted-foreground'>
-                  Seleccione primero un objeto compatible.
-                </p>
+        <Card className='gap-0 overflow-hidden py-0 shadow-none'>
+          <Tabs defaultValue='objects' className='gap-0'>
+            <div className='border-b p-2'>
+              <TabsList className='grid w-full grid-cols-2'>
+                <TabsTrigger value='objects'>
+                  Objetos ({effectiveObjects.length})
+                </TabsTrigger>
+                <TabsTrigger value='counters'>
+                  Contadores ({counterIds.length})
+                </TabsTrigger>
+              </TabsList>
+            </div>
+            <TabsContent value='objects' className='m-0'>
+              <CardHeader className='border-b px-4 py-4'>
+                <Input
+                  value={objectSearch}
+                  onChange={(e) => setObjectSearch(e.target.value)}
+                  placeholder='Buscar nodo o interfaz'
+                  aria-label='Buscar objetos'
+                />
+              </CardHeader>
+              <ScrollArea className='h-[480px]'>
+                <CardContent className='space-y-2 p-2'>
+                  {objectGroups.map((group) => (
+                    <SelectorGroup
+                      key={group}
+                      title={group}
+                      icon={group === 'Testbed' ? Server : Network}
+                    >
+                      {catalog.data?.objects
+                        .filter(
+                          (item) =>
+                            item.group === group &&
+                            item.label
+                              .toLowerCase()
+                              .includes(objectSearch.toLowerCase())
+                        )
+                        .map((item) => (
+                          <label
+                            key={item.id}
+                            className='flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-muted'
+                          >
+                            <Checkbox
+                              checked={effectiveObjects.includes(item.id)}
+                              onCheckedChange={() => toggleObject(item.id)}
+                            />
+                            <span className='min-w-0 flex-1 truncate text-sm'>
+                              {item.label}
+                            </span>
+                            {item.counter_count && (
+                              <span className='text-[10px] text-muted-foreground'>
+                                {item.counter_count}
+                              </span>
+                            )}
+                            {item.status && (
+                              <span
+                                className={`size-2 rounded-full ${item.status === 'running' || item.status === 'UP' ? 'bg-emerald-500' : 'bg-muted-foreground'}`}
+                              />
+                            )}
+                          </label>
+                        ))}
+                    </SelectorGroup>
+                  ))}
+                </CardContent>
+              </ScrollArea>
+            </TabsContent>
+            <TabsContent value='counters' className='m-0'>
+              {effectiveObjects.some((id) => id.startsWith('nf:')) && (
+                <div className='flex flex-wrap gap-1 border-b p-2'>
+                  <Button
+                    size='sm'
+                    variant={counterKind === 'service' ? 'secondary' : 'ghost'}
+                    onClick={() => setCounterKind('service')}
+                  >
+                    Servicio
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant={
+                      counterKind === 'operations' ? 'secondary' : 'ghost'
+                    }
+                    onClick={() => setCounterKind('operations')}
+                  >
+                    Operación y recursos
+                  </Button>
+                </div>
               )}
-            </CardContent>
-          </ScrollArea>
+              <CardHeader className='border-b px-4 py-3'>
+                <Input
+                  value={counterSearch}
+                  onChange={(e) => setCounterSearch(e.target.value)}
+                  placeholder='Buscar contador, causa, DNN…'
+                  aria-label='Buscar contadores'
+                />
+                <p className='text-[11px] text-muted-foreground'>
+                  {compatibleCounters.length} disponibles · máximo 12
+                </p>
+              </CardHeader>
+              <ScrollArea className='h-[460px]'>
+                <CardContent className='space-y-3 p-2'>
+                  {counterGroups.map((group) => (
+                    <SelectorGroup key={group} title={group} icon={Database}>
+                      {compatibleCounters
+                        .filter((item) => item.category === group)
+                        .map((item) => (
+                          <label
+                            key={item.id}
+                            title={`${item.source} · ${item.kind === 'counter' ? 'acumulado' : 'instantáneo'}\n${item.description ?? item.label}${item.native_name ? '\n' + item.native_name : ''}${item.last_seen ? '\nÚltima muestra: ' + new Date(item.last_seen).toLocaleString() : ''}`}
+                            className='flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-muted'
+                          >
+                            <Checkbox
+                              className='mt-0.5'
+                              checked={counterIds.includes(item.id)}
+                              disabled={
+                                !counterIds.includes(item.id) &&
+                                counterIds.length >= 12
+                              }
+                              onCheckedChange={() => toggleCounter(item.id)}
+                            />
+                            <span className='min-w-0 flex-1'>
+                              <span className='block text-sm'>
+                                {item.label}
+                              </span>
+                            </span>
+                            <Badge variant='secondary'>{item.unit}</Badge>
+                          </label>
+                        ))}
+                    </SelectorGroup>
+                  ))}
+                  {!compatibleCounters.length && (
+                    <p className='rounded-md border border-dashed p-4 text-sm text-muted-foreground'>
+                      {effectiveObjects.some((id) => id.startsWith('nf:')) &&
+                      counterKind === 'service'
+                        ? 'Esta NF no tiene contadores de servicio disponibles en el catálogo actual. Consulta Operación y recursos.'
+                        : 'No hay contadores disponibles para esta selección.'}
+                    </p>
+                  )}
+                </CardContent>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
         </Card>
       </div>
-
-      {catalog.data && wizardOpen && (
-        <QueryWizard
-          open={wizardOpen}
-          onOpenChange={setWizardOpen}
-          objects={catalog.data.objects}
-          counters={catalog.data.counters}
-          initial={draft}
-          onApply={applyDraft}
-        />
-      )}
 
       <Dialog open={folderOpen} onOpenChange={setFolderOpen}>
         <DialogContent>
@@ -808,7 +834,6 @@ export function PerformancePage() {
 
 function LibrarySection({
   title,
-  icon: Icon,
   children,
 }: {
   title: string
@@ -816,10 +841,9 @@ function LibrarySection({
   children: React.ReactNode
 }) {
   return (
-    <Collapsible defaultOpen>
+    <Collapsible defaultOpen={title !== 'Funciones de red'}>
       <CollapsibleTrigger className='flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm font-medium hover:bg-muted'>
         <ChevronDown className='size-4' />
-        <Icon className='size-4 text-primary' />
         {title}
       </CollapsibleTrigger>
       <CollapsibleContent className='ml-4 border-l pl-2'>
@@ -928,7 +952,6 @@ function PresetItem({
 
 function SelectorGroup({
   title,
-  icon: Icon,
   children,
 }: {
   title: string
@@ -938,33 +961,10 @@ function SelectorGroup({
   return (
     <section>
       <div className='mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase'>
-        <Icon className='size-4' />
         {title}
       </div>
       <div>{children}</div>
     </section>
-  )
-}
-
-function MetricSummary({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string
-  value: string
-  icon: typeof Database
-}) {
-  return (
-    <div className='flex items-center gap-3 rounded-lg border bg-muted/15 p-3'>
-      <div className='rounded-md bg-primary/10 p-2 text-primary'>
-        <Icon className='size-4' />
-      </div>
-      <div>
-        <p className='text-xs text-muted-foreground'>{label}</p>
-        <p className='font-semibold'>{value}</p>
-      </div>
-    </div>
   )
 }
 

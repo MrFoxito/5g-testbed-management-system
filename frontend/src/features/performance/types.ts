@@ -107,6 +107,31 @@ export function supportsObject(counter: KpiCounter, objectId: string) {
     : counter.objects.includes(objectId.split(':')[0] as KpiObject['type'])
 }
 
+// NF and procedure catalog IDs identify distinct measurement domains.
+// Interfaces may be compared together, but never mixed with host or NF data.
+export function measurementDomain(objectId: string) {
+  const type = objectId.split(':')[0]
+  return type === 'nf' || type === 'procedure' ? objectId : type
+}
+
+export function selectMeasurementObject(current: string[], id: string) {
+  if (current.includes(id)) return current.filter((item) => item !== id)
+  return current.every(
+    (item) => measurementDomain(item) === measurementDomain(id)
+  )
+    ? [...current, id]
+    : [id]
+}
+
+export function isOperationalCounter(counter: KpiCounter) {
+  return (
+    counter.id === 'core.nf.availability' ||
+    counter.id.startsWith('nf.process.') ||
+    counter.source === 'systemd /proc' ||
+    /^(process_|go_|python_|promhttp_)/.test(counter.native_name ?? '')
+  )
+}
+
 export function recommendedCounters(counters: KpiCounter[], objectId: string) {
   const compatible = counters.filter((counter) =>
     supportsObject(counter, objectId)

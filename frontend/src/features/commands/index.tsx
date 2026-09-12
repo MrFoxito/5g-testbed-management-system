@@ -22,6 +22,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { api, apiErrorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -61,7 +62,6 @@ import type {
   OperationsCatalog,
 } from './types'
 
-type ScenarioId = '5g-sa' | '4g-epc'
 type ResultTab = 'result' | 'history'
 
 export function CommandsPage() {
@@ -72,7 +72,7 @@ export function CommandsPage() {
   const initialNode =
     searchParams.get('component') || searchParams.get('node') || ''
 
-  const [scenario, setScenario] = useState<ScenarioId>('5g-sa')
+  const scenario = useScenarioStore((state) => state.scenario)
   const [selectedComponentId, setSelectedComponentId] = useState(initialNode)
   const [selectedOperationId, setSelectedOperationId] = useState('')
   const [paramValues, setParamValues] = useState<Record<string, unknown>>({})
@@ -238,14 +238,7 @@ export function CommandsPage() {
     setSelectedOperationId(operation.id)
     setParamValues(defaults)
     setCommandInput(
-      stripEnvelope(
-        toMmlSyntax(
-          operation,
-          comp.id,
-          comp.label,
-          defaults
-        )
-      )
+      stripEnvelope(toMmlSyntax(operation, comp.id, comp.label, defaults))
     )
     setParametersOpen(operation.parameters.length > 0)
     setCatalogOpen(false)
@@ -294,7 +287,8 @@ export function CommandsPage() {
     const tokens = cleanQuery.split(/\s+/).filter(Boolean)
 
     const matches = allMmlSuggestions.filter((item) => {
-      const targetText = `${item.code} ${item.syntax} ${item.operation.label} ${item.component.id} ${item.component.label} ${item.operation.id}`.toUpperCase()
+      const targetText =
+        `${item.code} ${item.syntax} ${item.operation.label} ${item.component.id} ${item.component.label} ${item.operation.id}`.toUpperCase()
       return tokens.every((token) => targetText.includes(token))
     })
 
@@ -403,43 +397,7 @@ export function CommandsPage() {
   }
 
   return (
-    <EmsPage
-      title='Comandos'
-      description=''
-      actions={
-        <div className='flex flex-wrap items-center gap-2'>
-          <Badge variant='outline' className='font-mono text-xs'>
-            {catalogQuery.data?.execution_mode?.toUpperCase() ?? '—'}
-          </Badge>
-          <Select
-            value={scenario}
-            disabled={executeMutation.isPending}
-            onValueChange={(value) => {
-              setScenario(value as ScenarioId)
-              setSelectedComponentId('')
-              setSelectedOperationId('')
-              setParamValues({})
-              setCommandInput('')
-              setLastResult(null)
-              setParametersOpen(false)
-              setResultTab('result')
-            }}
-          >
-            <SelectTrigger className='w-40' aria-label='Escenario'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-              <SelectItem value='4g-epc'>4G EPC</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant='outline' onClick={() => setManualOpen(true)}>
-            <BookOpen className='size-4' />
-            Manual
-          </Button>
-        </div>
-      }
-    >
+    <EmsPage title='Comandos' description=''>
       {catalogQuery.error && (
         <Alert variant='destructive' className='mb-3'>
           <AlertTitle>Catálogo no disponible</AlertTitle>
@@ -451,8 +409,8 @@ export function CommandsPage() {
           </AlertDescription>
         </Alert>
       )}
-      <Card className='overflow-hidden p-0 mb-6'>
-        <div className='grid h-[calc(100dvh-215px)] min-h-[520px] grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[230px_minmax(0,1fr)]'>
+      <Card className='mb-6 overflow-hidden p-0'>
+        <div className='grid h-[calc(100dvh-110px)] min-h-[520px] grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[230px_minmax(0,1fr)]'>
           <aside className='flex min-h-0 flex-col border-b md:border-r md:border-b-0'>
             <div className='flex items-center justify-between border-b px-3 py-2 text-xs font-semibold'>
               Elementos de red{' '}
@@ -506,7 +464,15 @@ export function CommandsPage() {
                     {currentComponent?.unit}
                   </span>
                 </div>
-                <div className='flex items-center gap-1'>
+                <div className='flex flex-wrap items-center gap-1'>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => setManualOpen(true)}
+                  >
+                    <BookOpen className='size-4' />
+                    Manual
+                  </Button>
                   <Button
                     variant='ghost'
                     size='sm'
@@ -538,7 +504,7 @@ export function CommandsPage() {
                 {showSuggestions && suggestions.length > 0 && (
                   <div
                     ref={suggestionsContainerRef}
-                    className='absolute top-full left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-lg border border-border/80 bg-popover/95 backdrop-blur-sm text-popover-foreground shadow-2xl animate-in fade-in-0 zoom-in-95 duration-100'
+                    className='absolute top-full right-0 left-0 z-50 mt-1.5 animate-in overflow-hidden rounded-lg border border-border/80 bg-popover/95 text-popover-foreground shadow-2xl backdrop-blur-sm duration-100 fade-in-0 zoom-in-95'
                   >
                     <div className='flex items-center justify-between border-b border-border/60 bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground'>
                       <div className='flex items-center gap-1.5 font-medium'>
@@ -549,16 +515,16 @@ export function CommandsPage() {
                         ↑ ↓ navegar · Tab o ↵ autocompletar · Esc cerrar
                       </span>
                     </div>
-                    <div className='max-h-56 overflow-y-auto p-1 divide-y divide-border/20'>
+                    <div className='max-h-56 divide-y divide-border/20 overflow-y-auto p-1'>
                       {suggestions.map((item, idx) => (
                         <button
                           key={`${item.component.id}-${item.operation.id}-${idx}`}
                           type='button'
                           className={cn(
-                            'flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left transition-colors font-mono',
+                            'flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-2 text-left font-mono transition-colors',
                             idx === activeSuggestionIndex
-                              ? 'bg-primary text-primary-foreground font-semibold'
-                              : 'hover:bg-muted/70 text-foreground'
+                              ? 'bg-primary font-semibold text-primary-foreground'
+                              : 'text-foreground hover:bg-muted/70'
                           )}
                           onMouseDown={(e) => {
                             e.preventDefault()
@@ -566,7 +532,7 @@ export function CommandsPage() {
                           }}
                           onMouseEnter={() => setActiveSuggestionIndex(idx)}
                         >
-                          <div className='flex items-center gap-2 min-w-0 flex-1 text-xs'>
+                          <div className='flex min-w-0 flex-1 items-center gap-2 text-xs'>
                             <Badge
                               variant={
                                 idx === activeSuggestionIndex
@@ -574,7 +540,7 @@ export function CommandsPage() {
                                   : 'secondary'
                               }
                               className={cn(
-                                'h-4 px-1 text-[9px] font-sans uppercase shrink-0 font-semibold',
+                                'h-4 shrink-0 px-1 font-sans text-[9px] font-semibold uppercase',
                                 idx === activeSuggestionIndex &&
                                   'border-primary-foreground/40 text-primary-foreground'
                               )}
@@ -585,7 +551,7 @@ export function CommandsPage() {
                               {item.syntax}
                             </span>
                           </div>
-                          <div className='flex items-center gap-1.5 shrink-0'>
+                          <div className='flex shrink-0 items-center gap-1.5'>
                             {item.operation.mutating ? (
                               <Wrench
                                 className={cn(
@@ -607,7 +573,7 @@ export function CommandsPage() {
                             )}
                             <span
                               className={cn(
-                                'truncate max-w-[150px] text-[11px] font-sans',
+                                'max-w-[150px] truncate font-sans text-[11px]',
                                 idx === activeSuggestionIndex
                                   ? 'text-primary-foreground/90'
                                   : 'text-muted-foreground'

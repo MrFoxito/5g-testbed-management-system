@@ -12,6 +12,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useScenarioStore } from '@/stores/scenario-store'
 import {
   api,
   type ConfigFile,
@@ -46,7 +47,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmsPage } from '@/features/ems-page'
 
 export function ConfigurationPage() {
-  const [scenario, setScenario] = useState('5g-sa')
+  const scenario = useScenarioStore((state) => state.scenario)
   const [selectedFilePath, setSelectedFilePath] = useState<string>('')
   const [activeTab, setActiveTab] = useState('viewer')
 
@@ -59,7 +60,9 @@ export function ConfigurationPage() {
   })
 
   const effectiveFilePath = selectedFilePath || filesQuery.data?.[0]?.path || ''
-  const selectedFile = filesQuery.data?.find((f) => f.path === effectiveFilePath)
+  const selectedFile = filesQuery.data?.find(
+    (f) => f.path === effectiveFilePath
+  )
   const selectedComponentId = selectedFile?.component_id
   const selectedPath = selectedFile?.path
 
@@ -78,16 +81,13 @@ export function ConfigurationPage() {
   const validationQuery = useQuery({
     queryKey: ['config-validate', scenario],
     queryFn: async () => {
-      const resp = await api.get<ConfigValidationResult>(`/config/validate/${scenario}`)
+      const resp = await api.get<ConfigValidationResult>(
+        `/config/validate/${scenario}`
+      )
       return resp.data
     },
     enabled: activeTab === 'validation',
   })
-
-  const handleScenarioChange = (newScenario: string) => {
-    setScenario(newScenario)
-    setSelectedFilePath('')
-  }
 
   const handleRefresh = async () => {
     if (activeTab === 'viewer') {
@@ -103,34 +103,32 @@ export function ConfigurationPage() {
     <EmsPage
       title='Configuration Center'
       description='Inspección segura de YAML remotos con ofuscación de secretos y validación cruzada 3GPP.'
-      actions={
-        <div className='flex items-center gap-3'>
-          <Select value={scenario} onValueChange={handleScenarioChange}>
-            <SelectTrigger className='w-48'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-              <SelectItem value='4g-epc'>4G EPC</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant='outline' size='icon' onClick={handleRefresh} title='Actualizar'>
-            <RefreshCw className='h-4 w-4' />
+    >
+      <Tabs
+        value={activeTab}
+        onValueChange={setActiveTab}
+        className='space-y-4'
+      >
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <TabsList className='grid w-full max-w-md grid-cols-2'>
+            <TabsTrigger value='viewer' className='flex items-center gap-2'>
+              <FileCode className='h-4 w-4' />
+              Visor de Archivos (NF)
+            </TabsTrigger>
+            <TabsTrigger value='validation' className='flex items-center gap-2'>
+              <SlidersHorizontal className='h-4 w-4' />
+              Validación Telco & Baseline
+            </TabsTrigger>
+          </TabsList>
+          <Button
+            variant='outline'
+            size='icon'
+            onClick={handleRefresh}
+            aria-label='Actualizar configuración'
+          >
+            <RefreshCw className='size-4' />
           </Button>
         </div>
-      }
-    >
-      <Tabs value={activeTab} onValueChange={setActiveTab} className='space-y-4'>
-        <TabsList className='grid w-full max-w-md grid-cols-2'>
-          <TabsTrigger value='viewer' className='flex items-center gap-2'>
-            <FileCode className='h-4 w-4' />
-            Visor de Archivos (NF)
-          </TabsTrigger>
-          <TabsTrigger value='validation' className='flex items-center gap-2'>
-            <SlidersHorizontal className='h-4 w-4' />
-            Validación Telco & Baseline
-          </TabsTrigger>
-        </TabsList>
 
         <TabsContent value='viewer' className='space-y-4'>
           <Card>
@@ -150,8 +148,12 @@ export function ConfigurationPage() {
                     <SelectContent>
                       {filesQuery.data?.map((item) => (
                         <SelectItem key={item.path} value={item.path}>
-                          <span className='font-semibold'>{item.component}</span>{' '}
-                          <span className='text-xs text-muted-foreground'>({item.path})</span>
+                          <span className='font-semibold'>
+                            {item.component}
+                          </span>{' '}
+                          <span className='text-xs text-muted-foreground'>
+                            ({item.path})
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -160,7 +162,10 @@ export function ConfigurationPage() {
 
                 <div className='flex flex-wrap items-center gap-2'>
                   {selectedFile && (
-                    <Badge variant='outline' className='flex items-center gap-1 text-xs'>
+                    <Badge
+                      variant='outline'
+                      className='flex items-center gap-1 text-xs'
+                    >
                       <Layers className='h-3 w-3' />
                       NF: {selectedFile.component}
                     </Badge>
@@ -168,15 +173,22 @@ export function ConfigurationPage() {
                   {contentQuery.data && (
                     <>
                       <Badge
-                        variant={contentQuery.data.redacted_fields > 0 ? 'secondary' : 'outline'}
-                        className='flex items-center gap-1 text-xs text-emerald-500 border-emerald-500/30'
+                        variant={
+                          contentQuery.data.redacted_fields > 0
+                            ? 'secondary'
+                            : 'outline'
+                        }
+                        className='flex items-center gap-1 border-emerald-500/30 text-xs text-emerald-500'
                       >
                         <ShieldCheck className='h-3 w-3' />
                         {contentQuery.data.redacted_fields > 0
                           ? `${contentQuery.data.redacted_fields} secreto(s) ocultado(s)`
                           : 'Sin secretos expuestos'}
                       </Badge>
-                      <Badge variant='outline' className='font-mono text-[10px] text-muted-foreground'>
+                      <Badge
+                        variant='outline'
+                        className='font-mono text-[10px] text-muted-foreground'
+                      >
                         SHA256: {contentQuery.data.sha256.slice(0, 10)}...
                       </Badge>
                     </>
@@ -192,7 +204,8 @@ export function ConfigurationPage() {
                   </div>
                 ) : contentQuery.isError ? (
                   <div className='flex h-full items-center justify-center text-sm text-destructive'>
-                    No se pudo leer el archivo en la VM. Verifique que el servicio esté instalado.
+                    No se pudo leer el archivo en la VM. Verifique que el
+                    servicio esté instalado.
                   </div>
                 ) : (
                   <Editor
@@ -218,7 +231,9 @@ export function ConfigurationPage() {
           <div className='grid gap-4 md:grid-cols-3'>
             <Card>
               <CardHeader className='flex flex-row items-center justify-between pb-2'>
-                <CardTitle className='text-sm font-medium'>Checks Aprobados</CardTitle>
+                <CardTitle className='text-sm font-medium'>
+                  Checks Aprobados
+                </CardTitle>
                 <CheckCircle2 className='h-4 w-4 text-emerald-500' />
               </CardHeader>
               <CardContent>
@@ -233,7 +248,9 @@ export function ConfigurationPage() {
 
             <Card>
               <CardHeader className='flex flex-row items-center justify-between pb-2'>
-                <CardTitle className='text-sm font-medium'>Advertencias</CardTitle>
+                <CardTitle className='text-sm font-medium'>
+                  Advertencias
+                </CardTitle>
                 <AlertTriangle className='h-4 w-4 text-amber-500' />
               </CardHeader>
               <CardContent>
@@ -248,7 +265,9 @@ export function ConfigurationPage() {
 
             <Card>
               <CardHeader className='flex flex-row items-center justify-between pb-2'>
-                <CardTitle className='text-sm font-medium'>Errores de Coherencia</CardTitle>
+                <CardTitle className='text-sm font-medium'>
+                  Errores de Coherencia
+                </CardTitle>
                 <XCircle className='h-4 w-4 text-destructive' />
               </CardHeader>
               <CardContent>
@@ -264,9 +283,12 @@ export function ConfigurationPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Comprobaciones de Coherencia 3GPP & Endpoints</CardTitle>
+              <CardTitle>
+                Comprobaciones de Coherencia 3GPP & Endpoints
+              </CardTitle>
               <CardDescription>
-                Validación cruzada de parámetros (MCC, MNC, TAC, DNN, S-NSSAI) entre NFs y verificación de sockets en escucha.
+                Validación cruzada de parámetros (MCC, MNC, TAC, DNN, S-NSSAI)
+                entre NFs y verificación de sockets en escucha.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -283,49 +305,66 @@ export function ConfigurationPage() {
                 <TableBody>
                   {validationQuery.isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className='text-center text-muted-foreground'>
+                      <TableCell
+                        colSpan={5}
+                        className='text-center text-muted-foreground'
+                      >
                         Ejecutando validaciones en la VM...
                       </TableCell>
                     </TableRow>
-                  ) : validationQuery.data?.checks.map((check) => (
-                    <TableRow key={check.id}>
-                      <TableCell>
-                        {check.status === 'pass' && (
-                          <Badge variant='outline' className='border-emerald-500/30 text-emerald-500 gap-1'>
-                            <CheckCircle2 className='h-3 w-3' /> Pass
-                          </Badge>
-                        )}
-                        {check.status === 'warning' && (
-                          <Badge variant='outline' className='border-amber-500/30 text-amber-500 gap-1'>
-                            <AlertTriangle className='h-3 w-3' /> Warning
-                          </Badge>
-                        )}
-                        {check.status === 'error' && (
-                          <Badge variant='destructive' className='gap-1'>
-                            <XCircle className='h-3 w-3' /> Error
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <span className='font-mono text-xs uppercase text-muted-foreground'>
-                          {check.category}
-                        </span>
-                      </TableCell>
-                      <TableCell className='font-medium'>{check.title}</TableCell>
-                      <TableCell className='font-mono text-xs text-muted-foreground'>
-                        {check.evidence}
-                      </TableCell>
-                      <TableCell>
-                        <div className='flex flex-wrap gap-1'>
-                          {check.components.map((c) => (
-                            <Badge key={c} variant='secondary' className='text-[10px] uppercase'>
-                              {c}
+                  ) : (
+                    validationQuery.data?.checks.map((check) => (
+                      <TableRow key={check.id}>
+                        <TableCell>
+                          {check.status === 'pass' && (
+                            <Badge
+                              variant='outline'
+                              className='gap-1 border-emerald-500/30 text-emerald-500'
+                            >
+                              <CheckCircle2 className='h-3 w-3' /> Pass
                             </Badge>
-                          ))}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                          )}
+                          {check.status === 'warning' && (
+                            <Badge
+                              variant='outline'
+                              className='gap-1 border-amber-500/30 text-amber-500'
+                            >
+                              <AlertTriangle className='h-3 w-3' /> Warning
+                            </Badge>
+                          )}
+                          {check.status === 'error' && (
+                            <Badge variant='destructive' className='gap-1'>
+                              <XCircle className='h-3 w-3' /> Error
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className='font-mono text-xs text-muted-foreground uppercase'>
+                            {check.category}
+                          </span>
+                        </TableCell>
+                        <TableCell className='font-medium'>
+                          {check.title}
+                        </TableCell>
+                        <TableCell className='font-mono text-xs text-muted-foreground'>
+                          {check.evidence}
+                        </TableCell>
+                        <TableCell>
+                          <div className='flex flex-wrap gap-1'>
+                            {check.components.map((c) => (
+                              <Badge
+                                key={c}
+                                variant='secondary'
+                                className='text-[10px] uppercase'
+                              >
+                                {c}
+                              </Badge>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </CardContent>
@@ -333,14 +372,18 @@ export function ConfigurationPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Diff contra Parámetros de Referencia (Baseline Esperado)</CardTitle>
+              <CardTitle>
+                Diff contra Parámetros de Referencia (Baseline Esperado)
+              </CardTitle>
               <CardDescription>
-                Muestra diferencias unificadas entre los valores esperados por el curso y los valores observados en las configuraciones.
+                Muestra diferencias unificadas entre los valores esperados por
+                el curso y los valores observados en las configuraciones.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <pre className='h-48 overflow-auto rounded bg-muted/40 p-4 font-mono text-xs leading-relaxed'>
-                {validationQuery.data?.baseline_diff || 'No se han detectado discrepancias con el baseline.'}
+                {validationQuery.data?.baseline_diff ||
+                  'No se han detectado discrepancias con el baseline.'}
               </pre>
             </CardContent>
           </Card>

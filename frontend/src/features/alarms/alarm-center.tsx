@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import {
   Bell,
   BellOff,
@@ -14,9 +15,9 @@ import {
   Settings2,
   Terminal,
 } from 'lucide-react'
-import { Link } from '@tanstack/react-router'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { api, apiErrorMessage } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -105,13 +106,7 @@ export function AlarmsPage() {
   const canOperate = useAuthStore((state) =>
     ['admin', 'teacher'].includes(state.auth.user?.role ?? '')
   )
-  const [scenario, setScenario] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search)
-      return p.get('scenario') || '5g-sa'
-    }
-    return '5g-sa'
-  })
+  const scenario = useScenarioStore((state) => state.scenario)
   const [view, setView] = useState<'active' | 'history' | 'config'>('active')
   const [auto, setAuto] = useState(true)
   const [notify, setNotify] = useState(false)
@@ -255,57 +250,39 @@ export function AlarmsPage() {
         .includes(search.toLowerCase())
   )
   return (
-    <EmsPage
-      title='Alarmas'
-      description=''
-      actions={
-        <div className='flex items-center gap-2'>
-          <select
-            aria-label='Escenario'
-            className={selectClass}
-            value={scenario}
-            onChange={(event) => {
-              setScenario(event.target.value)
-              setComponent('')
-              resetSelection()
-            }}
-          >
-            <option value='5g-sa'>5G Standalone</option>
-            <option value='4g-epc'>4G EPC</option>
-          </select>
-          <Button
-            variant='outline'
-            size='icon'
-            aria-label='Actualizar alarmas'
-            onClick={refresh}
-          >
-            <RefreshCw
-              className={`size-4 ${query.isFetching ? 'animate-spin' : ''}`}
-            />
-          </Button>
-        </div>
-      }
-    >
+    <EmsPage title='Alarmas' description=''>
       <div className='overflow-hidden rounded-xl border bg-background'>
         <div className='flex flex-wrap items-center justify-between gap-3 border-b px-4 py-2'>
-          <nav aria-label='Vistas de alarmas' className='flex gap-1'>
-            {(
-              [
-                ['active', 'Activas'],
-                ['history', 'Historial'],
-                ['config', 'Configuración'],
-              ] as const
-            ).map(([key, label]) => (
-              <Button
-                key={key}
-                size='sm'
-                variant={view === key ? 'secondary' : 'ghost'}
-                onClick={() => changeView(key)}
-              >
-                {label}
-              </Button>
-            ))}
-          </nav>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Button
+              variant='ghost'
+              size='icon'
+              aria-label='Actualizar alarmas'
+              onClick={refresh}
+            >
+              <RefreshCw
+                className={query.isFetching ? 'size-4 animate-spin' : 'size-4'}
+              />
+            </Button>
+            <nav aria-label='Vistas de alarmas' className='flex gap-1'>
+              {(
+                [
+                  ['active', 'Activas'],
+                  ['history', 'Historial'],
+                  ['config', 'Configuración'],
+                ] as const
+              ).map(([key, label]) => (
+                <Button
+                  key={key}
+                  size='sm'
+                  variant={view === key ? 'secondary' : 'ghost'}
+                  onClick={() => changeView(key)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </nav>
+          </div>
           <div
             className='flex flex-wrap gap-2'
             title='Incidentes activos del escenario, incluidos los enmascarados'
@@ -975,11 +952,14 @@ function Detail({
           <code className='break-all'>{incident.id}</code>
         </div>
       </div>
-      <div className='flex flex-wrap items-center gap-2 pt-2 border-t'>
-        <span className='text-[10px] font-semibold text-muted-foreground uppercase tracking-wider'>
+      <div className='flex flex-wrap items-center gap-2 border-t pt-2'>
+        <span className='text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>
           Acciones de Mitigación (FCAPS):
         </span>
-        <Link to={'/commands' as any} search={{ component: incident.component } as any}>
+        <Link
+          to={'/commands' as any}
+          search={{ component: incident.component } as any}
+        >
           <Button variant='outline' size='sm' className='h-7 gap-1.5 text-xs'>
             <Terminal className='size-3 text-primary' />
             Consola MML ({incident.component.toUpperCase()})

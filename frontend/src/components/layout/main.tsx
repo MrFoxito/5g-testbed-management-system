@@ -9,9 +9,10 @@ type MainProps = React.HTMLAttributes<HTMLElement> & {
 export function Main({ fixed, className, fluid = true, ...props }: MainProps) {
   return (
     <main
+      id='content'
       data-layout={fixed ? 'fixed' : 'auto'}
       className={cn(
-        'min-w-0 w-full px-3 py-4 md:px-4',
+        'w-full min-w-0 px-3 py-4 md:px-4',
 
         // If layout is fixed, make the main container flex and grow
         fixed && 'flex grow flex-col overflow-hidden',

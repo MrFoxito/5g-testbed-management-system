@@ -10,17 +10,11 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { useScenarioStore } from '@/stores/scenario-store'
 import { api, apiErrorMessage, canTrace } from '@/lib/api'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmsPage } from '@/features/ems-page'
 import { InterfaceTraceForm } from './components/interface-trace-form'
@@ -37,13 +31,12 @@ import {
 } from './types'
 
 type TraceTab = 'interface' | 'subscriber' | 'tasks'
-type ScenarioId = '5g-sa' | '4g-epc'
 
 export function TracesPage() {
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.auth.user)
   const [tab, setTab] = useState<TraceTab>('interface')
-  const [scenario, setScenario] = useState<ScenarioId>('5g-sa')
+  const scenario = useScenarioStore((state) => state.scenario)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   const capabilities = useQuery({
@@ -182,7 +175,8 @@ export function TracesPage() {
   }
 
   const activeCount = tasks.data?.filter(isActiveTrace).length ?? 0
-  const subscriberSupported = capabilities.data?.subscriber?.enabled !== false
+  const subscriberSupported =
+    scenario === '5g-sa' && capabilities.data?.subscriber?.enabled !== false
   const canCreate = canTrace(user?.role) && Boolean(user)
   const selectedIsLoading =
     Boolean(selectedTaskId) && !resolvedTask && taskDetail.isLoading
@@ -190,7 +184,6 @@ export function TracesPage() {
   const changeTab = (value: string) => {
     const next = value as TraceTab
     setTab(next)
-    if (next === 'subscriber' && scenario !== '5g-sa') setScenario('5g-sa')
   }
 
   if (selectedTaskId && resolvedTask) {
@@ -227,53 +220,9 @@ export function TracesPage() {
   }
 
   return (
-    <EmsPage
-      title='Centro de trazas'
-      description=''
-      actions={
-        <div className='flex items-center gap-2'>
-          {activeCount > 0 && (
-            <Badge className='hidden gap-1 sm:flex'>
-              <Activity className='size-3 animate-pulse' /> {activeCount}{' '}
-              activas
-            </Badge>
-          )}
-          <Select
-            value={scenario}
-            disabled={tab === 'subscriber'}
-            onValueChange={(value) => setScenario(value as ScenarioId)}
-          >
-            <SelectTrigger className='w-44'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='5g-sa'>5G Standalone</SelectItem>
-              <SelectItem value='4g-epc'>4G EPC</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant='outline'
-            size='icon'
-            aria-label='Actualizar tareas y capacidades'
-            disabled={tasks.isFetching || capabilities.isFetching}
-            onClick={() => {
-              void tasks.refetch()
-              void capabilities.refetch()
-            }}
-          >
-            <RefreshCw
-              className={
-                tasks.isFetching || capabilities.isFetching
-                  ? 'animate-spin'
-                  : ''
-              }
-            />
-          </Button>
-        </div>
-      }
-    >
+    <EmsPage title='Centro de trazas' description=''>
       <Tabs value={tab} onValueChange={changeTab} className='gap-5'>
-        <div className='overflow-x-auto pb-1'>
+        <div className='flex flex-wrap items-center justify-between gap-2 pb-1'>
           <TabsList className='h-10'>
             <TabsTrigger value='interface' className='px-3'>
               <Radio /> Interface Trace
@@ -281,7 +230,12 @@ export function TracesPage() {
             <TabsTrigger
               value='subscriber'
               className='px-3'
-              disabled={!subscriberSupported && !capabilities.isLoading}
+              disabled={!subscriberSupported}
+              title={
+                scenario !== '5g-sa'
+                  ? 'Subscriber Trace solo disponible en 5G Standalone'
+                  : undefined
+              }
             >
               <UserRoundSearch /> Subscriber Trace
             </TabsTrigger>
@@ -294,6 +248,33 @@ export function TracesPage() {
               )}
             </TabsTrigger>
           </TabsList>
+          <div className='flex items-center gap-2'>
+            {activeCount > 0 && (
+              <Badge className='hidden gap-1 sm:flex'>
+                <Activity className='size-3 animate-pulse' /> {activeCount}{' '}
+                activas
+              </Badge>
+            )}
+
+            <Button
+              variant='outline'
+              size='icon'
+              aria-label='Actualizar tareas y capacidades'
+              disabled={tasks.isFetching || capabilities.isFetching}
+              onClick={() => {
+                void tasks.refetch()
+                void capabilities.refetch()
+              }}
+            >
+              <RefreshCw
+                className={
+                  tasks.isFetching || capabilities.isFetching
+                    ? 'animate-spin'
+                    : ''
+                }
+              />
+            </Button>
+          </div>
         </div>
 
         {capabilities.error && tab !== 'tasks' && (
