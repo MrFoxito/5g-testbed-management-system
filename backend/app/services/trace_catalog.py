@@ -15,7 +15,7 @@ TRACE_PROFILES: dict[str, dict[str, dict[str, Any]]] = {
         "n3": {
             "label": "N3 · UPF ↔ gNodeB",
             "interface_3gpp": "N3",
-            "device": "lo",
+            "device": "any",
             "protocols": ["GTP-U"],
             "filter": "udp port 2152",
             "nf_ids": ["upf", "gnb"],
@@ -24,7 +24,7 @@ TRACE_PROFILES: dict[str, dict[str, dict[str, Any]]] = {
         "n4": {
             "label": "N4 · SMF ↔ UPF",
             "interface_3gpp": "N4",
-            "device": "lo",
+            "device": "any",
             "protocols": ["PFCP"],
             "filter": "udp port 8805",
             "nf_ids": ["smf", "upf"],

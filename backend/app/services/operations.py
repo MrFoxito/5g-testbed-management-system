@@ -79,6 +79,13 @@ PSI_PARAMETER = {
     "minimum": 1,
     "maximum": 15,
 }
+AMF_ID_PARAMETER = {
+    "id": "amf_id",
+    "label": "ID de AMF",
+    "type": "number",
+    "required": False,
+    "description": "Identificador de la asociación AMF (si se omite, se detecta automáticamente).",
+}
 
 
 COMMON_OPERATIONS = [
@@ -140,7 +147,13 @@ GNB_OPERATIONS = [
     _native("gnb.status", "Estado NG-RAN", "Estado operativo y asociación del gNodeB.", "status"),
     _native("gnb.info", "Información del gNodeB", "Identidad, PLMN, TAC y configuración efectiva.", "info"),
     _native("gnb.amf-list", "AMF asociados", "Lista las asociaciones AMF conocidas por el gNodeB.", "amf-list"),
-    _native("gnb.amf-info", "Detalle de AMF", "Muestra información de la conexión N2 seleccionada.", "amf-info"),
+    _native(
+        "gnb.amf-info",
+        "Detalle de AMF",
+        "Muestra información de la conexión N2 seleccionada.",
+        "amf-info",
+        parameters=[NODE_PARAMETER, AMF_ID_PARAMETER],
+    ),
     _native("gnb.ue-count", "Contar UE conectados", "Cantidad actual de UE asociados al gNodeB.", "ue-count"),
     _native("gnb.ue-list", "Listar UE conectados", "Lista UE asociados al gNodeB.", "ue-list"),
 ]

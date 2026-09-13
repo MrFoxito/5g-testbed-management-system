@@ -33,8 +33,10 @@ const CANONICAL_ORDER = [
   'udm',
   'udr',
   'nrf',
+  'scp',
   'nssf',
   'pcf',
+  'bsf',
   'smf',
   'sgwc',
   'upf',
@@ -453,9 +455,10 @@ export function SequenceDiagram({
                         fill={selected ? '#ffffff' : color}
                         className='font-mono text-[10px] font-semibold'
                       >
-                        {truncate(
+                        {formatPillMessage(
                           event.message,
-                          Math.max(12, Math.floor(labelWidth / 6.4))
+                          Math.max(12, Math.floor(labelWidth / 6.4)),
+                          Boolean(event.interpretation_policy)
                         )}
                         <title>{event.message}</title>
                       </text>
@@ -468,9 +471,16 @@ export function SequenceDiagram({
                         {(() => {
                           const proto = event.protocol?.toUpperCase()
                           const iface = event.interface_3gpp ?? event.interface
-                          const parts = [proto, iface].filter(Boolean) as string[]
+                          const parts = [proto, iface].filter(
+                            Boolean
+                          ) as string[]
                           // Avoid duplicating when protocol already contains the interface name
-                          if (parts.length === 2 && proto && iface && proto.toLowerCase().includes(iface.toLowerCase()))
+                          if (
+                            parts.length === 2 &&
+                            proto &&
+                            iface &&
+                            proto.toLowerCase().includes(iface.toLowerCase())
+                          )
                             return proto
                           return parts.join(' · ')
                         })()}
@@ -488,15 +498,17 @@ export function SequenceDiagram({
         <span className='font-semibold tracking-wide uppercase'>
           Protocolos
         </span>
-        {['NAS', 'NGAP', 'HTTP2', 'PFCP', 'GTP-U', 'ICMP', 'NR-Uu'].map((protocol) => (
-          <span key={protocol} className='flex items-center gap-1.5'>
-            <span
-              className='h-0.5 w-5 rounded-full'
-              style={{ backgroundColor: protocolColor(protocol) }}
-            />
-            {protocol}
-          </span>
-        ))}
+        {['NAS', 'NGAP', 'HTTP2', 'PFCP', 'GTP-U', 'ICMP', 'NR-Uu'].map(
+          (protocol) => (
+            <span key={protocol} className='flex items-center gap-1.5'>
+              <span
+                className='h-0.5 w-5 rounded-full'
+                style={{ backgroundColor: protocolColor(protocol) }}
+              />
+              {protocol}
+            </span>
+          )
+        )}
         <span className='ml-auto'>
           Línea discontinua = evento correlacionado
         </span>
@@ -506,6 +518,8 @@ export function SequenceDiagram({
 }
 
 function isNoise(event: TraceEvent) {
+  // Keep R16 protocol evidence, including NRF management and HTTP responses.
+  if (event.interpretation_policy) return event.interface_3gpp === 'Transport'
   const message = (event.message || '').toLowerCase()
   const protocol = (event.protocol || '').toLowerCase()
   if (
@@ -540,10 +554,24 @@ function isNoise(event: TraceEvent) {
 }
 
 function matchesProcedure(event: TraceEvent, procedure: string) {
+  if (event.interpretation_policy) {
+    if (procedure === 'registration') {
+      return (
+        event.procedure === 'registration' ||
+        event.procedure === 'authentication'
+      )
+    }
+    return event.procedure === procedure
+  }
   const message = event.message.toLowerCase()
   if (event.procedure === procedure) return true
   if (procedure === 'registration')
-    return message.includes('registration') || message.includes('attach')
+    return (
+      message.includes('registration') ||
+      message.includes('attach') ||
+      message.includes('authenticat') ||
+      message.includes('security')
+    )
   if (procedure === 'authentication')
     return message.includes('authenticat') || message.includes('security')
   if (procedure === 'pdu-session')
@@ -660,6 +688,75 @@ function participantRank(id: string) {
   const index = CANONICAL_ORDER.indexOf(id)
   return index === -1 ? CANONICAL_ORDER.length : index
 }
+function formatPillMessage(value: string, max: number, literal = false) {
+  if (literal) return truncate(value, max)
+  const text = value
+    .replace(/N2 Initial UE Message \(Registration Request\)/gi, 'N2 Initial UE (Reg Req)')
+    .replace(/N2 Initial Context Setup Request \(Registration Accept\)/gi, 'N2 Init Context (Reg Accept)')
+    .replace(/N2 Initial Context Setup Response/gi, 'N2 Init Context Resp')
+    .replace(/NAS Registration Complete \+ PDU Session Establishment Request \(PSI: 1 & 2\)/gi, 'NAS Reg OK + PDU Req [PSI 1,2]')
+    .replace(/NAS Registration Complete/gi, 'NAS Reg Complete')
+    .replace(/NAS Configuration Update Command/gi, 'NAS Config Update Cmd')
+    .replace(/NAS Authentication Request \(RAND, AUTN, ngKSI\)/gi, 'NAS Auth Req (RAND, AUTN)')
+    .replace(/NAS Authentication Response \(RES\*\)/gi, 'NAS Auth Resp (RES*)')
+    .replace(/NAS Security Mode Command/gi, 'NAS Security Mode Cmd')
+    .replace(/NAS Security Mode Complete/gi, 'NAS Security Mode OK')
+    .replace(/Nausf_UEAuthentication_Authenticate Request/gi, 'Nausf_Auth Req')
+    .replace(/Nausf_UEAuthentication_Authenticate Response/gi, 'Nausf_Auth Resp')
+    .replace(/Nudm_UEAuthentication_ResultConfirmation \(auth-events\) Request/gi, 'Nudm_Auth ResultConfirm')
+    .replace(/Nudm_UEAuthentication Response/gi, 'Nudm_Auth Resp')
+    .replace(/Nudr_DM_Query Request/gi, 'Nudr_DM Query Req')
+    .replace(/Nudr_DM_Query Response/gi, 'Nudr_DM Query Resp')
+    .replace(/Nudr_DM_Update/gi, 'Nudr_DM Update')
+    .replace(/Nudr_DM Response/gi, 'Nudr_DM Resp')
+    .replace(/Nudm_UECM_Registration/gi, 'Nudm_UECM Reg')
+    .replace(/Nudm_SDM_Get Request/gi, 'Nudm_SDM Get Req')
+    .replace(/Nudm_SDM_Get Response/gi, 'Nudm_SDM Get Resp')
+    .replace(/Nudm_SDM_Subscribe Request/gi, 'Nudm_SDM Sub Req')
+    .replace(/Nudm_SDM_Subscribe Response/gi, 'Nudm_SDM Sub Resp')
+    .replace(/Npcf_AMPolicyControl_Create Request/gi, 'Npcf_AMPolicy Create Req')
+    .replace(/Npcf_AMPolicyControl_Create Response/gi, 'Npcf_AMPolicy Create Resp')
+    .replace(/Npcf_SMPolicyControl_Create Request/gi, 'Npcf_SMPolicy Create Req')
+    .replace(/Npcf_SMPolicyControl_Create Response/gi, 'Npcf_SMPolicy Create Resp')
+    .replace(/Nbsf_Management_Register Request/gi, 'Nbsf_Reg Req')
+    .replace(/Nbsf_Management_Register Response/gi, 'Nbsf_Reg Resp')
+    .replace(/Nsmf_PDUSession_CreateSMContext Request/gi, 'Nsmf_CreateSMContext Req')
+    .replace(/Nsmf_PDUSession_CreateSMContext Response/gi, 'Nsmf_CreateSMContext Resp')
+    .replace(/Namf_Communication_N1N2MessageTransfer/gi, 'Namf_N1N2Transfer')
+    .replace(/N2 PDU Session Resource Setup Request \(PDU Session Establishment Accept\)/gi, 'N2 PDU Setup Req (Accept)')
+    .replace(/N2 PDU Session Resource Setup Response/gi, 'N2 PDU Setup Resp')
+    .replace(/N4 Session Establishment Request/gi, 'N4 Estab Req')
+    .replace(/N4 Session Establishment Response/gi, 'N4 Estab Resp')
+    .replace(/N4 Session Modification Request/gi, 'N4 Mod Req')
+    .replace(/N4 Session Modification Response/gi, 'N4 Mod Resp')
+    .replace(/\[UPF-01 \/ Internet\]/gi, '[Internet]')
+    .replace(/\[UPF-02 \/ Corporate\]/gi, '[Corp]')
+    .replace(/PDUSessionResourceSetupRequest/gi, 'PDU Setup Req')
+    .replace(/PDUSessionResourceSetupResponse/gi, 'PDU Setup Resp')
+    .replace(/PFCP Session Establishment Request/gi, 'PFCP Estab Req')
+    .replace(/PFCP Session Establishment Response/gi, 'PFCP Estab Resp')
+    .replace(/PFCP Session Modification Request/gi, 'PFCP Mod Req')
+    .replace(/PFCP Session Modification Response/gi, 'PFCP Mod Resp')
+    .replace(/PDU Session Establishment Accept/gi, 'PDU Estab Accept')
+    .replace(/PDU Session Establishment Request/gi, 'PDU Estab Req')
+    .replace(/RRC Reconfiguration Complete/gi, 'RRC Reconfig OK')
+    .replace(/Npcf_SMPolicyControl \(Create Policy\)/gi, 'Npcf_SMPolicy Create')
+    .replace(/Npcf_SMPolicyControl \(SM Policy\)/gi, 'Npcf_SMPolicy')
+    .replace(/Nsmf_PDUSession Create Context/gi, 'Nsmf_PDU Create Context')
+    .replace(/Nsmf_PDUSession Modify Context/gi, 'Nsmf_PDU Modify Context')
+    .replace(/\(Corporate \/ UPF-02\)/gi, '[Corp]')
+    .replace(/\(Internet \/ UPF-01\)/gi, '[Internet]')
+    .replace(/\(PSI: 1 & 2\)/gi, '[PSI 1,2]')
+    .replace(/Security Mode Command/gi, 'Security Mode Cmd')
+    .replace(/Security Mode Complete/gi, 'Security Mode OK')
+    .replace(/Authentication Request/gi, 'Auth Request')
+    .replace(/Authentication Response/gi, 'Auth Response')
+    .replace(/Nausf_UEAuthentication/gi, 'Nausf_Auth')
+    .replace(/Nudm_UEAuthentication/gi, 'Nudm_Auth')
+
+  return truncate(text, max)
+}
+
 function truncate(value: string, max: number) {
   return value.length <= max
     ? value

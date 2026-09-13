@@ -272,6 +272,21 @@ class LocalExecutionAdapter(ExecutionAdapter):
             dumped = await self._run(cli, "--dump")
             nodes = _parse_ueransim_nodes(dumped)
             node = _select_ueransim_node(nodes, component, parameters.get("node_name"))
+            raw_command = str(parameters.get("command", ""))
+            if component == "gnb" and raw_command == "amf-info" and not parameters.get("amf_id"):
+                try:
+                    list_out = await self._run(cli, node, "--exec", "amf-list")
+                    amf_ids = re.findall(r"id:\s*(\d+)", list_out)
+                except Exception:
+                    amf_ids = []
+                if not amf_ids:
+                    amf_ids = ["0"]
+                outputs = []
+                for aid in amf_ids:
+                    sub_out = await self._run(cli, node, "--exec", f"amf-info {aid}")
+                    outputs.append(sub_out.strip())
+                output = "\n\n".join(outputs)
+                return {"output": output, "data": _key_value_payload(output)}
             command = _validate_ueransim_command(component, parameters)
             output = await self._run(cli, node, "--exec", command)
             return {"output": output, "data": _key_value_payload(output)}
@@ -301,13 +316,30 @@ class RemoteExecutionAdapter(ExecutionAdapter):
         if unit not in self.allowed_units:
             raise ExecutionError(f"Unidad no permitida: {unit}")
 
-    def _execute_sync(self, command: str) -> str:
+    def _remote_unit_name(self, unit: str) -> str:
+        if unit in ("open5gs-upfd2", "open5gs-upfd-2"):
+            return "open5gs-upfd"
+        return unit
+
+    def _port_for_unit(self, unit: str) -> int:
+        if unit in ("open5gs-upfd2", "open5gs-upfd-2"):
+            return getattr(self.settings, "upf2_ssh_port", 2224)
+        if unit == "open5gs-upfd":
+            return getattr(self.settings, "upf_ssh_port", 2223)
+        if unit == "ueransim-gnb":
+            return getattr(self.settings, "gnb_ssh_port", 2225)
+        if unit == "ueransim-ue":
+            return getattr(self.settings, "ue_ssh_port", 2226)
+        return self.settings.ssh_port
+
+    def _execute_sync(self, command: str, port: int | None = None) -> str:
         import paramiko
         import time
 
+        target_port = port or self.settings.ssh_port
         connect_kwargs = {
             "hostname": self.settings.testbed_host,
-            "port": self.settings.ssh_port,
+            "port": target_port,
             "username": self.settings.ssh_user,
             "look_for_keys": bool(self.settings.ssh_key_path),
             "allow_agent": False,
@@ -342,7 +374,7 @@ class RemoteExecutionAdapter(ExecutionAdapter):
             finally:
                 client.close()
 
-        raise ExecutionError(f"Error en comunicación SSH tras reintentos: {last_err}")
+        raise ExecutionError(f"Error en comunicación SSH tras reintentos (puerto {target_port}): {last_err}")
 
     def _sudo_cmd(self, subcmd: str) -> str:
         if self.settings.ssh_password:
@@ -350,18 +382,22 @@ class RemoteExecutionAdapter(ExecutionAdapter):
             return f"printf '%s\\n' {escaped_pass} | sudo -S {subcmd}"
         return f"sudo -n {subcmd}"
 
-    async def _run(self, command: str) -> str:
-        return await asyncio.to_thread(self._execute_sync, command)
+    async def _run(self, command: str, port: int | None = None) -> str:
+        return await asyncio.to_thread(self._execute_sync, command, port)
 
     async def start_service(self, unit: str) -> None:
         self._validate(unit)
-        cmd = self._sudo_cmd(f"systemctl start {shlex.quote(unit)}")
-        await self._run(cmd)
+        port = self._port_for_unit(unit)
+        r_unit = self._remote_unit_name(unit)
+        cmd = self._sudo_cmd(f"systemctl start {shlex.quote(r_unit)}")
+        await self._run(cmd, port=port)
 
     async def stop_service(self, unit: str) -> None:
         self._validate(unit)
-        cmd = self._sudo_cmd(f"systemctl stop {shlex.quote(unit)}")
-        await self._run(cmd)
+        port = self._port_for_unit(unit)
+        r_unit = self._remote_unit_name(unit)
+        cmd = self._sudo_cmd(f"systemctl stop {shlex.quote(r_unit)}")
+        await self._run(cmd, port=port)
 
     async def service_status(self, unit: str) -> str:
         return (await self.service_statuses([unit]))[unit]
@@ -369,25 +405,148 @@ class RemoteExecutionAdapter(ExecutionAdapter):
     async def service_statuses(self, units: list[str]) -> dict[str, str]:
         for unit in units:
             self._validate(unit)
-        safe_units = " ".join(shlex.quote(unit) for unit in units)
-        output = await self._run(
-            f"systemctl show --property=Id --property=ActiveState --no-pager {safe_units}"
-        )
-        return _parse_service_states(output, units)
+
+        groups: dict[int, list[str]] = {}
+        for unit in units:
+            p = self._port_for_unit(unit)
+            groups.setdefault(p, []).append(unit)
+
+        results: dict[str, str] = {}
+        for port, port_units in groups.items():
+            r_units = [self._remote_unit_name(u) for u in port_units]
+            safe_units = " ".join(shlex.quote(u) for u in set(r_units))
+            try:
+                output = await self._run(
+                    f"systemctl show --property=Id --property=ActiveState --no-pager {safe_units}",
+                    port=port,
+                )
+                parsed = _parse_service_states(output, r_units)
+                for u in port_units:
+                    results[u] = parsed.get(self._remote_unit_name(u), "unknown")
+            except Exception:
+                results.update({u: "unknown" for u in port_units})
+        return results
 
     async def logs(self, unit: str, lines: int = 100) -> list[str]:
         self._validate(unit)
+        port = self._port_for_unit(unit)
+        r_unit = self._remote_unit_name(unit)
         safe_lines = min(max(lines, 1), 500)
-        output = await self._run(f"journalctl -u {shlex.quote(unit)} -n {safe_lines} --no-pager")
+        output = await self._run(f"journalctl -u {shlex.quote(r_unit)} -n {safe_lines} --no-pager", port=port)
         return output.splitlines()
 
     async def runtime_snapshot(self) -> dict:
-        hostname, interfaces, sockets = await asyncio.gather(
-            self._run("hostname"),
-            self._run("ip -j address show"),
-            self._run("ss -H -lnutS"),
+        upf1_port = getattr(self.settings, "upf_ssh_port", 2223)
+        upf2_port = getattr(self.settings, "upf2_ssh_port", 2224)
+        gnb_port = getattr(self.settings, "gnb_ssh_port", 2225)
+        ue_port = getattr(self.settings, "ue_ssh_port", 2226)
+        core_task = asyncio.gather(
+            self._run("hostname", port=self.settings.ssh_port),
+            self._run("ip -j address show", port=self.settings.ssh_port),
+            self._run("ss -H -lnutS", port=self.settings.ssh_port),
         )
-        return _runtime_payload("remote", hostname, interfaces, sockets)
+        upf1_task = asyncio.gather(
+            self._run("hostname", port=upf1_port),
+            self._run("ip -j address show", port=upf1_port),
+            self._run("ss -H -lnutS", port=upf1_port),
+        )
+        upf2_task = asyncio.gather(
+            self._run("hostname", port=upf2_port),
+            self._run("ip -j address show", port=upf2_port),
+            self._run("ss -H -lnutS", port=upf2_port),
+        )
+        gnb_task = asyncio.gather(
+            self._run("hostname", port=gnb_port),
+            self._run("ip -j address show", port=gnb_port),
+            self._run("ss -H -lnutS", port=gnb_port),
+        )
+        ue_task = asyncio.gather(
+            self._run("hostname", port=ue_port),
+            self._run("ip -j address show", port=ue_port),
+            self._run("ss -H -lnutS", port=ue_port),
+        )
+        try:
+            (c_host, c_if, c_ss), (u1_host, u1_if, u1_ss), (u2_host, u2_if, u2_ss), (gnb_host, gnb_if, gnb_ss), (ue_host, ue_if, ue_ss) = await asyncio.gather(
+                core_task, upf1_task, upf2_task, gnb_task, ue_task
+            )
+            core_payload = _runtime_payload("remote", c_host, c_if, c_ss)
+            u1_payload = _runtime_payload("remote", u1_host, u1_if, u1_ss)
+            u2_payload = _runtime_payload("remote", u2_host, u2_if, u2_ss)
+            gnb_payload = _runtime_payload("remote", gnb_host, gnb_if, gnb_ss)
+            ue_payload = _runtime_payload("remote", ue_host, ue_if, ue_ss)
+
+            u1_ifaces = [
+                item for item in u1_payload["interfaces"]
+                if item["name"] == "ogstun" or not any(ci["name"] == item["name"] for ci in core_payload["interfaces"])
+            ]
+            u2_ifaces = [
+                item for item in u2_payload["interfaces"]
+                if item["name"] == "ogstun" or not any(ci["name"] == item["name"] for ci in core_payload["interfaces"])
+            ]
+            gnb_ifaces = [
+                item for item in gnb_payload["interfaces"]
+                if not any(ci["name"] == item["name"] for ci in core_payload["interfaces"])
+            ]
+            ue_ifaces = [
+                item for item in ue_payload["interfaces"]
+                if item["name"].startswith("uesimtun") or not any(ci["name"] == item["name"] for ci in core_payload["interfaces"])
+            ]
+            return {
+                "source": "remote",
+                "hostname": f"{c_host.strip()} + {u1_host.strip()} + {u2_host.strip()} + {gnb_host.strip()} + {ue_host.strip()}",
+                "hosts": [
+                    {
+                        "id": "core",
+                        "hostname": c_host.strip(),
+                        "ip": "10.210.50.1",
+                        "role": "Plano de Control 5GC (AMF, SMF, UDM, NRF)",
+                        "port": self.settings.ssh_port,
+                        "interfaces": core_payload["interfaces"],
+                        "listening_ports": core_payload["listening_ports"],
+                    },
+                    {
+                        "id": "upf-vm",
+                        "hostname": u1_host.strip(),
+                        "ip": "10.210.50.8",
+                        "role": "Plano de Usuario UPF-01 (Internet / eMBB)",
+                        "port": upf1_port,
+                        "interfaces": u1_payload["interfaces"],
+                        "listening_ports": u1_payload["listening_ports"],
+                    },
+                    {
+                        "id": "upf-vm2",
+                        "hostname": u2_host.strip(),
+                        "ip": "10.210.50.9",
+                        "role": "Plano de Usuario UPF-02 (Corporativo / MEC)",
+                        "port": upf2_port,
+                        "interfaces": u2_payload["interfaces"],
+                        "listening_ports": u2_payload["listening_ports"],
+                    },
+                    {
+                        "id": "gnb-vm",
+                        "hostname": gnb_host.strip(),
+                        "ip": "10.210.50.10",
+                        "role": "Radio Access Network gNodeB (UERANSIM)",
+                        "port": gnb_port,
+                        "interfaces": gnb_payload["interfaces"],
+                        "listening_ports": gnb_payload["listening_ports"],
+                    },
+                    {
+                        "id": "ue-vm",
+                        "hostname": ue_host.strip(),
+                        "ip": "10.210.50.11",
+                        "role": "Dispositivo de Usuario 5G (Dual PDU Sessions)",
+                        "port": ue_port,
+                        "interfaces": ue_payload["interfaces"],
+                        "listening_ports": ue_payload["listening_ports"],
+                    },
+                ],
+                "interfaces": core_payload["interfaces"] + u1_ifaces + u2_ifaces + gnb_ifaces + ue_ifaces,
+                "listening_ports": core_payload["listening_ports"] + u1_payload["listening_ports"] + u2_payload["listening_ports"] + gnb_payload["listening_ports"] + ue_payload["listening_ports"],
+            }
+        except Exception:
+            hostname, interfaces, sockets = await core_task
+            return _runtime_payload("remote", hostname, interfaces, sockets)
 
     @staticmethod
     def _capture_paths(trace_id: str) -> tuple[str, str]:
@@ -549,9 +708,17 @@ class RemoteExecutionAdapter(ExecutionAdapter):
         else:
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         try:
+            if "upf.yaml" in remote_path:
+                target_port = getattr(self.settings, "upf_ssh_port", 2223)
+            elif "gnb" in remote_path:
+                target_port = getattr(self.settings, "gnb_ssh_port", 2225)
+            elif "ue" in remote_path:
+                target_port = getattr(self.settings, "ue_ssh_port", 2226)
+            else:
+                target_port = self.settings.ssh_port
             connect_kwargs = {
                 "hostname": self.settings.testbed_host,
-                "port": self.settings.ssh_port,
+                "port": target_port,
                 "username": self.settings.ssh_user,
                 "look_for_keys": bool(self.settings.ssh_key_path),
                 "allow_agent": False,
@@ -579,9 +746,8 @@ class RemoteExecutionAdapter(ExecutionAdapter):
             raise ExecutionError("Ruta remota fuera de las ubicaciones permitidas")
         return await asyncio.to_thread(self._read_file_sync, remote_path)
 
-    async def remote_kpis(self) -> dict:
-        cmd = "cat /proc/net/dev; echo '===SEP==='; cat /proc/loadavg; echo '===SEP==='; free -m"
-        output = await self._run(cmd)
+    @staticmethod
+    def _parse_kpi_text(output: str) -> dict:
         parts = output.split("===SEP===")
         if len(parts) < 3:
             raise ExecutionError("Formato de métricas remoto inválido")
@@ -618,49 +784,153 @@ class RemoteExecutionAdapter(ExecutionAdapter):
             "memory_percent": mem_percent,
         }
 
-    async def generate_test_traffic(self, count: int = 3) -> dict:
-        cmd = self._sudo_cmd(
-            f"ip netns exec ueransim-999700000000001-internet-psi1 ping -c {int(count)} -W 2 8.8.8.8"
-        )
-        output = await self._run(cmd)
-        return {"output": output, "success": "bytes from" in output}
+    async def remote_kpis(self) -> dict:
+        cmd = "cat /proc/net/dev; echo '===SEP==='; cat /proc/loadavg; echo '===SEP==='; free -m"
+        upf1_port = getattr(self.settings, "upf_ssh_port", 2223)
+        upf2_port = getattr(self.settings, "upf2_ssh_port", 2224)
+        gnb_port = getattr(self.settings, "gnb_ssh_port", 2225)
+        ue_port = getattr(self.settings, "ue_ssh_port", 2226)
+        try:
+            core_out, u1_out, u2_out, gnb_out, ue_out = await asyncio.gather(
+                self._run(cmd, port=self.settings.ssh_port),
+                self._run(cmd, port=upf1_port),
+                self._run(cmd, port=upf2_port),
+                self._run(cmd, port=gnb_port),
+                self._run(cmd, port=ue_port),
+            )
+            core_kpis = self._parse_kpi_text(core_out)
+            u1_kpis = self._parse_kpi_text(u1_out)
+            u2_kpis = self._parse_kpi_text(u2_out)
+            gnb_kpis = self._parse_kpi_text(gnb_out)
+            ue_kpis = self._parse_kpi_text(ue_out)
+
+            merged_interfaces = dict(core_kpis["interfaces"])
+            if "ogstun" in u1_kpis["interfaces"]:
+                merged_interfaces["ogstun"] = u1_kpis["interfaces"]["ogstun"]
+            if "ogstun" in u2_kpis["interfaces"]:
+                merged_interfaces["ogstun_corp"] = u2_kpis["interfaces"]["ogstun"]
+            if "enp0s8" in u1_kpis["interfaces"]:
+                merged_interfaces["enp0s8_upf1"] = u1_kpis["interfaces"]["enp0s8"]
+            if "enp0s8" in u2_kpis["interfaces"]:
+                merged_interfaces["enp0s8_upf2"] = u2_kpis["interfaces"]["enp0s8"]
+            if "enp0s8" in gnb_kpis["interfaces"]:
+                merged_interfaces["enp0s8_gnb"] = gnb_kpis["interfaces"]["enp0s8"]
+            if "uesimtun0" in ue_kpis["interfaces"]:
+                merged_interfaces["uesimtun0"] = ue_kpis["interfaces"]["uesimtun0"]
+            if "uesimtun1" in ue_kpis["interfaces"]:
+                merged_interfaces["uesimtun1"] = ue_kpis["interfaces"]["uesimtun1"]
+
+            active_kpis = [core_kpis, u1_kpis, u2_kpis, gnb_kpis, ue_kpis]
+            avg_load = round(sum(k["load_1m"] for k in active_kpis) / len(active_kpis), 2)
+            avg_mem = round(sum(k["memory_percent"] for k in active_kpis) / len(active_kpis), 1)
+
+            return {
+                "interfaces": merged_interfaces,
+                "load_1m": avg_load,
+                "memory_percent": avg_mem,
+            }
+        except Exception:
+            output = await self._run(cmd, port=self.settings.ssh_port)
+            return self._parse_kpi_text(output)
 
     async def set_ip_forward(self, enable: bool) -> None:
         val = "1" if enable else "0"
+        upf1_port = getattr(self.settings, "upf_ssh_port", 2223)
+        upf2_port = getattr(self.settings, "upf2_ssh_port", 2224)
         cmd = self._sudo_cmd(f"sysctl -w net.ipv4.ip_forward={val}")
-        await self._run(cmd)
+        await asyncio.gather(
+            self._run(cmd, port=upf1_port),
+            self._run(cmd, port=upf2_port),
+            self._run(cmd, port=self.settings.ssh_port),
+            return_exceptions=True,
+        )
 
     async def get_ip_forward(self) -> bool:
+        upf_port = getattr(self.settings, "upf_ssh_port", 2223)
         cmd = self._sudo_cmd("cat /proc/sys/net/ipv4/ip_forward")
-        out = await self._run(cmd)
-        return out.strip() == "1"
+        try:
+            out = await self._run(cmd, port=upf_port)
+            return out.strip() == "1"
+        except Exception:
+            out = await self._run(cmd, port=self.settings.ssh_port)
+            return out.strip() == "1"
 
-    async def _remote_nr_cli(self) -> str:
+    async def generate_test_traffic(self, count: int = 3) -> dict:
+        ue_port = getattr(self.settings, "ue_ssh_port", 2226)
+        cmd = f"ping -c {int(count)} -I uesimtun0 -W 2 8.8.8.8"
+        try:
+            output = await self._run(cmd, port=ue_port)
+            return {"output": output, "success": "bytes from" in output}
+        except Exception:
+            fallback_cmd = self._sudo_cmd(
+                f"ip netns exec ueransim-999700000000001-internet-psi1 ping -c {int(count)} -W 2 8.8.8.8"
+            )
+            output = await self._run(fallback_cmd, port=self.settings.ssh_port)
+            return {"output": output, "success": "bytes from" in output}
+
+    async def _remote_nr_cli(self, port: int | None = None) -> str:
+        target_port = port or getattr(self.settings, "ue_ssh_port", 2226)
         output = await self._run(
             "for p in \"$(command -v nr-cli 2>/dev/null)\" \"$HOME/UERANSIM/build/nr-cli\" /usr/local/bin/nr-cli; "
-            "do if [ -n \"$p\" ] && [ -x \"$p\" ]; then printf '%s' \"$p\"; exit 0; fi; done; exit 127"
+            "do if [ -n \"$p\" ] && [ -x \"$p\" ]; then printf '%s' \"$p\"; exit 0; fi; done; exit 127",
+            port=target_port,
         )
         path = output.strip()
         if not path.startswith("/") or not re.fullmatch(r"[A-Za-z0-9_./-]+", path):
-            raise ExecutionError("Ruta de nr-cli invÃ¡lida")
+            raise ExecutionError("Ruta de nr-cli inválida")
         return path
 
     async def native_operation(
         self, operation: str, component: str, parameters: dict
     ) -> dict:
         if operation == "ueransim-nodes":
-            cli = await self._remote_nr_cli()
-            output = await self._run(f"{shlex.quote(cli)} --dump")
-            nodes = _parse_ueransim_nodes(output)
-            return {"output": output, "data": {"nodes": nodes}}
+            ue_port = getattr(self.settings, "ue_ssh_port", 2226)
+            gnb_port = getattr(self.settings, "gnb_ssh_port", 2225)
+            nodes = []
+            try:
+                cli_ue = await self._remote_nr_cli(ue_port)
+                out_ue = await self._run(f"{shlex.quote(cli_ue)} --dump", port=ue_port)
+                nodes.extend(_parse_ueransim_nodes(out_ue))
+            except Exception:
+                pass
+            try:
+                cli_gnb = await self._remote_nr_cli(gnb_port)
+                out_gnb = await self._run(f"{shlex.quote(cli_gnb)} --dump", port=gnb_port)
+                nodes.extend(_parse_ueransim_nodes(out_gnb))
+            except Exception:
+                pass
+            return {"output": "\n".join(nodes), "data": {"nodes": nodes}}
         if operation == "ueransim-cli":
-            cli = await self._remote_nr_cli()
-            dumped = await self._run(f"{shlex.quote(cli)} --dump")
+            target_port = getattr(self.settings, "ue_ssh_port", 2226) if "ue" in component.lower() else getattr(self.settings, "gnb_ssh_port", 2225)
+            cli = await self._remote_nr_cli(target_port)
+            dumped = await self._run(f"{shlex.quote(cli)} --dump", port=target_port)
             nodes = _parse_ueransim_nodes(dumped)
             node = _select_ueransim_node(nodes, component, parameters.get("node_name"))
+            raw_command = str(parameters.get("command", ""))
+            if component == "gnb" and raw_command == "amf-info" and not parameters.get("amf_id"):
+                try:
+                    list_out = await self._run(
+                        f"{shlex.quote(cli)} {shlex.quote(node)} --exec amf-list",
+                        port=target_port,
+                    )
+                    amf_ids = re.findall(r"id:\s*(\d+)", list_out)
+                except Exception:
+                    amf_ids = []
+                if not amf_ids:
+                    amf_ids = ["0"]
+                outputs = []
+                for aid in amf_ids:
+                    sub_out = await self._run(
+                        f"{shlex.quote(cli)} {shlex.quote(node)} --exec {shlex.quote(f'amf-info {aid}')}",
+                        port=target_port,
+                    )
+                    outputs.append(sub_out.strip())
+                output = "\n\n".join(outputs)
+                return {"output": output, "data": _key_value_payload(output)}
             command = _validate_ueransim_command(component, parameters)
             output = await self._run(
-                f"{shlex.quote(cli)} {shlex.quote(node)} --exec {shlex.quote(command)}"
+                f"{shlex.quote(cli)} {shlex.quote(node)} --exec {shlex.quote(command)}",
+                port=target_port,
             )
             return {"output": output, "data": _key_value_payload(output)}
         if operation == "open5gs-info":
@@ -711,6 +981,10 @@ def _select_ueransim_node(nodes: list[str], component: str, requested: str | Non
 def _validate_ueransim_command(component: str, parameters: dict) -> str:
     command = str(parameters.get("command", ""))
     if component == "gnb" and command in _GNB_COMMANDS:
+        if command == "amf-info":
+            amf_id = parameters.get("amf_id")
+            if amf_id is not None and str(amf_id).strip():
+                return f"amf-info {amf_id}"
         return command
     if component == "ue" and command in _UE_COMMANDS:
         return command

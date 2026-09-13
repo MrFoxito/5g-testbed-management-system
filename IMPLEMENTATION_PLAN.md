@@ -1,5 +1,7 @@
 # Plan de implementación: EMS educativo multi-VM para laboratorios 4G/5G
 
+> Ampliación propuesta (2026-09-12): el [plan del testbed 5G de 12 VMs](PLAN_TESTBED_5G_12_VM.md) define el nuevo alcance multiinstancia y CHF, sus fases y criterios de aceptación. Este documento se conserva como plan base e histórico; la exclusión inicial de Accounting se revisa para esa extensión 5G, sin implicar que ya esté implementada.
+
 ## 1. Decisión de enfoque
 
 Se desarrollará una **plataforma web educativa inspirada en EMS/FCAPS** para gestionar, monitorear y analizar testbeds 4G/5G open source desplegados en máquinas virtuales locales y en el VNRT de la PUCP.

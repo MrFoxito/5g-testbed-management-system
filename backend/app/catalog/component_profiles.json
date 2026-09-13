@@ -35,16 +35,23 @@
   "5G:smf": {
     "expected_endpoints": [
       {"protocol":"tcp","address":"127.0.0.4","port":7777,"interface":"SBI"},
-      {"protocol":"udp","address":"127.0.0.4","port":8805,"interface":"N4"}
+      {"protocol":"udp","address":"10.210.50.1","port":8805,"interface":"N4"}
     ],
     "config_paths": ["/etc/open5gs/smf.yaml"], "procedures": ["Establecimiento de PDU Session", "Control PFCP de UPF"]
   },
   "5G:upf": {
     "expected_endpoints": [
-      {"protocol":"udp","address":"127.0.0.7","port":8805,"interface":"N4"},
-      {"protocol":"udp","address":"127.0.0.7","port":2152,"interface":"N3"}
+      {"protocol":"udp","address":"10.210.50.8","port":8805,"interface":"N4"},
+      {"protocol":"udp","address":"10.210.50.8","port":2152,"interface":"N3"}
     ],
-    "config_paths": ["/etc/open5gs/upf.yaml"], "procedures": ["Creación de sesión PFCP", "Transporte de plano de usuario"]
+    "config_paths": ["/etc/open5gs/upf.yaml"], "procedures": ["Creación de sesión PFCP Internet", "Transporte de plano de usuario (eMBB)"]
+  },
+  "5G:upf2": {
+    "expected_endpoints": [
+      {"protocol":"udp","address":"10.210.50.9","port":8805,"interface":"N4"},
+      {"protocol":"udp","address":"10.210.50.9","port":2152,"interface":"N3"}
+    ],
+    "config_paths": ["/etc/open5gs/upf.yaml"], "procedures": ["Creación de sesión PFCP Corporativa", "Transporte de plano de usuario (MEC)"]
   },
   "5G:amf": {
     "expected_endpoints": [

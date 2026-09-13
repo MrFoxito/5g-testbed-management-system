@@ -847,8 +847,29 @@ function SelectedEventCard({
               label='Enlace'
               value={`${source.label} → ${target.label}`}
             />
-            <DecodeRow label='Origen' value={source.endpoint} mono />
-            <DecodeRow label='Destino' value={target.endpoint} mono />
+            <DecodeRow
+              label='Origen'
+              value={event.source_ip ?? source.endpoint}
+              mono
+            />
+            <DecodeRow
+              label='Destino'
+              value={event.target_ip ?? target.endpoint}
+              mono
+            />
+            {event.standard_references?.map((ref) => (
+              <DecodeRow
+                key={`${ref.spec}-${ref.clause}`}
+                label={ref.spec}
+                value={`V${ref.version} · § ${ref.clause}`}
+              />
+            ))}
+            {event.interpretation_policy && (
+              <DecodeRow
+                label='Validación'
+                value='Evidencia observada · timers no evaluados · no certifica conformidad'
+              />
+            )}
             <DecodeRow
               label='Procedimiento'
               value={event.procedure ?? 'No clasificado'}
@@ -1138,10 +1159,6 @@ export function TraceTaskDetailView({
       role === 'teacher' ||
       (!!task.owner && task.owner === currentUsername))
   const events = analysis?.events ?? []
-  const identifiers = useMemo(
-    () => buildIdentifierChain(task, analysis?.identifiers),
-    [analysis?.identifiers, task]
-  )
 
   return (
     <div className='flex flex-col gap-5'>
@@ -1255,15 +1272,6 @@ export function TraceTaskDetailView({
         <DetailSkeleton />
       ) : (
         <div className='space-y-5'>
-          <TraceSummaryBar task={task} analysis={analysis} />
-
-          {traceKind(task) === 'subscriber' && (
-            <IdentifierChain
-              identifiers={identifiers}
-              status={analysis?.correlation_status}
-            />
-          )}
-
           {analysisError && (
             <Alert variant='destructive'>
               <ShieldAlert />
@@ -1275,58 +1283,20 @@ export function TraceTaskDetailView({
             </Alert>
           )}
 
-          <Tabs defaultValue='sequence' className='gap-4'>
-            <div className='overflow-x-auto pb-1'>
-              <TabsList className='border bg-card p-1 shadow-xs'>
-                <TabsTrigger value='sequence' className='gap-1.5 font-medium'>
-                  <Network className='h-4 w-4 text-sky-500' /> Secuencia E2E
-                </TabsTrigger>
-                <TabsTrigger value='overview' className='gap-1.5 font-medium'>
-                  <Activity className='h-4 w-4 text-emerald-500' /> Resumen
-                </TabsTrigger>
-                <TabsTrigger value='timeline' className='gap-1.5 font-medium'>
-                  <GitBranch className='h-4 w-4 text-violet-500' /> Timeline{' '}
-                  <Badge variant='secondary' className='ml-1 text-[10px]'>
-                    {events.length}
-                  </Badge>
-                </TabsTrigger>
-                <TabsTrigger value='evidence' className='gap-1.5 font-medium'>
-                  <Braces className='h-4 w-4 text-amber-500' /> Evidencia 3GPP
-                </TabsTrigger>
-              </TabsList>
-            </div>
-            <TabsContent value='sequence' className='mt-2 space-y-4'>
-              <SequenceDiagram
-                events={events}
-                participants={analysis?.participants}
-                selectedEventId={selectedEvent?.id}
-                onSelectEvent={setSelectedEvent}
+          <div className='space-y-4'>
+            <SequenceDiagram
+              events={events}
+              participants={analysis?.participants}
+              selectedEventId={selectedEvent?.id}
+              onSelectEvent={setSelectedEvent}
+            />
+            {selectedEvent && (
+              <SelectedEventCard
+                event={selectedEvent}
+                onOpenTimeline={() => undefined}
               />
-              {selectedEvent && (
-                <SelectedEventCard
-                  event={selectedEvent}
-                  onOpenTimeline={() => undefined}
-                />
-              )}
-            </TabsContent>
-            <TabsContent value='overview' className='mt-2'>
-              <Overview task={task} analysis={analysis} />
-            </TabsContent>
-            <TabsContent value='timeline' className='mt-2'>
-              <TraceTimeline
-                events={events}
-                selectedEventId={selectedEvent?.id}
-                onSelectEvent={setSelectedEvent}
-              />
-            </TabsContent>
-            <TabsContent value='evidence' className='mt-2'>
-              <EvidenceView
-                task={task}
-                analysis={analysis}
-                onDownload={onDownload}
-              />
-            </TabsContent>
-          </Tabs>
+            )}
+          </div>
 
           <ConfirmDialog
             open={deleteOpen}

@@ -51,8 +51,9 @@ export function TopNavigation() {
       </Link>
       <nav
         aria-label='Navegación principal'
-        className='order-3 -mx-1 flex w-full min-w-0 items-center gap-0.5 overflow-x-auto px-1 pb-2 xl:order-none xl:mx-0 xl:h-14 xl:flex-1 xl:justify-center xl:pb-0'
+        className='order-3 -mx-1 flex w-full min-w-0 items-center overflow-x-auto px-1 pb-2 xl:order-none xl:mx-0 xl:h-14 xl:flex-1 xl:pb-0'
       >
+        <div className='flex shrink-0 items-center gap-0.5 xl:mx-auto'>
         {links.map((item) => {
           const active =
             item.url === '/'
@@ -76,6 +77,7 @@ export function TopNavigation() {
             </Link>
           )
         })}
+        </div>
       </nav>
       <div className='ml-auto flex h-14 shrink-0 items-center gap-2'>
         <Select

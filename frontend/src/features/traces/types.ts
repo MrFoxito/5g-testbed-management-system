@@ -197,6 +197,15 @@ export type TraceEventEndpoint = {
 }
 
 export type TraceEvent = {
+  interpretation_policy?: string
+  source_ip?: string
+  target_ip?: string
+  standard_references?: Array<{
+    spec: string
+    version: string
+    clause: string
+    source: string
+  }>
   id: string
   ordinal?: number
   timestamp: string
@@ -256,6 +265,7 @@ export type TraceDiagnostic = {
 }
 
 export type TraceAnalysis = {
+  analysis_policy?: string
   task_id: string
   generated_at?: string
   analysis_version?: string

@@ -221,19 +221,14 @@ def test_subscriber_trace_correlates_and_masks_identity(client, teacher_headers,
     analysis = client.get(f"/api/v1/traces/{task['id']}/analysis", headers=teacher_headers)
     assert analysis.status_code == 200
     data = analysis.json()
-    assert data["outcome"] == "success"
+    # This fixture has no observed NAS accept or AKA confirmation. Previously
+    # unrelated runtime logs incorrectly made the whole procedure successful.
+    assert data["outcome"] == "partial"
     assert data["target"]["matched"] is True
     kinds = {item["kind"] for item in data["identifiers"]}
-    assert kinds >= {
-        "supi",
-        "ran_ue_ngap_id",
-        "amf_ue_ngap_id",
-        "pdu_session_id",
-        "pfcp_seid",
-        "gtpu_teid",
-        "ue_ip",
-    }
-    assert all(event["evidence_type"] == "pcap" for event in data["events"])
+    assert kinds >= {"supi", "pfcp_seid", "gtpu_teid", "ue_ip"}
+    assert data["standards_review"]["conformance"] == "not-certified"
+    assert all(event["evidence_type"] == "simulated" for event in data["events"])
     assert identifier not in analysis.text
 
     forbidden = client.get(f"/api/v1/traces/{task['id']}", headers=student_headers)

@@ -78,7 +78,7 @@ export function TracesPage() {
 
   const createInterface = useMutation({
     mutationFn: async (draft: InterfaceTraceDraft) =>
-      (await api.post<TraceTask>('/traces/interface', draft)).data,
+      (await api.post<TraceTask>('/traces/interface', draft, { timeout: 60_000 })).data,
     onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ['trace-tasks'] })
       setTab('tasks')
@@ -93,7 +93,7 @@ export function TracesPage() {
 
   const createSubscriber = useMutation({
     mutationFn: async (draft: SubscriberTraceDraft) =>
-      (await api.post<TraceTask>('/traces/subscriber', draft)).data,
+      (await api.post<TraceTask>('/traces/subscriber', draft, { timeout: 60_000 })).data,
     onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ['trace-tasks'] })
       setTab('tasks')
@@ -111,7 +111,7 @@ export function TracesPage() {
 
   const stop = useMutation({
     mutationFn: async (task: TraceTask) =>
-      (await api.post<TraceTask>(`/traces/${task.id}/stop`)).data,
+      (await api.post<TraceTask>(`/traces/${task.id}/stop`, {}, { timeout: 60_000 })).data,
     onSuccess: (updated) => {
       queryClient.setQueryData<TraceTask[]>(['trace-tasks'], (current) =>
         current?.map((task) =>

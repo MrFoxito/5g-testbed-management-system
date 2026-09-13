@@ -147,42 +147,157 @@ export function TopologyPage() {
             <HostDetail
               runtime={runtime.data}
               components={status.data?.components ?? []}
+              selectedHostId={selection.id}
             />
           ) : component ? (
             <>
-              <SheetHeader>
-                <div className='flex items-center gap-2'>
-                  <SheetTitle>{component.label}</SheetTitle>
-                  <Badge
-                    variant={
-                      component.status === 'running' ? 'default' : 'destructive'
-                    }
-                  >
-                    {component.status}
-                  </Badge>
-                </div>
-                <SheetDescription>
-                  {component.unit} · nodo {component.node_id}
-                </SheetDescription>
-              </SheetHeader>
-
               {(() => {
+                const isUpf = component.id === 'upf' || component.id === 'upf2'
+                const upfInstances = isUpf
+                  ? (status.data?.components ?? []).filter(
+                      (c) => c.id === 'upf' || c.id === 'upf2' || c.kind === 'user-plane'
+                    )
+                  : []
+                const isMultiUpf = upfInstances.length > 1
+
                 const componentAlarms = (alarmCenter.data?.items ?? []).filter(
-                  (a) =>
-                    a.component === component.id ||
-                    a.component?.toLowerCase() === component.id.toLowerCase() ||
-                    (a.node_id && a.node_id === component.node_id)
+                  (a) => {
+                    if (isMultiUpf) {
+                      return upfInstances.some(
+                        (u) =>
+                          a.component === u.id ||
+                          a.component?.toLowerCase() === u.id.toLowerCase() ||
+                          (a.node_id &&
+                            (a.node_id === u.node_id ||
+                              a.node_id === 'upf-vm' ||
+                              a.node_id === 'upf-vm2'))
+                      )
+                    }
+                    return (
+                      a.component === component.id ||
+                      a.component?.toLowerCase() === component.id.toLowerCase() ||
+                      (a.node_id && a.node_id === component.node_id)
+                    )
+                  }
                 )
+
+                const allUpfRunning = isMultiUpf && upfInstances.every((c) => c.status === 'running')
+
                 return (
                   <>
+                    <SheetHeader>
+                      <div className='flex items-center gap-2'>
+                        <SheetTitle>
+                          {isMultiUpf ? 'UPF (Plano de Usuario)' : component.label}
+                        </SheetTitle>
+                        <Badge
+                          variant={
+                            (isMultiUpf ? allUpfRunning : component.status === 'running')
+                              ? 'default'
+                              : 'destructive'
+                          }
+                        >
+                          {isMultiUpf
+                            ? `${upfInstances.filter((c) => c.status === 'running').length}/${upfInstances.length} activas`
+                            : component.status}
+                        </Badge>
+                      </div>
+                      <SheetDescription>
+                        {isMultiUpf
+                          ? 'Arquitectura CUPS · 2 Instancias Dedicadas (Internet + Corporativo)'
+                          : `${component.unit} · nodo ${component.node_id}`}
+                      </SheetDescription>
+                    </SheetHeader>
+
+                    {/* Tarjetas de Instancias Multi-UPF */}
+                    {isMultiUpf && (
+                      <div className='mx-4 mt-3 space-y-2.5'>
+                        <h4 className='text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>
+                          Instancias Desplegadas ({upfInstances.length})
+                        </h4>
+                        {upfInstances.map((inst) => {
+                          const isCorp =
+                            inst.id === 'upf2' ||
+                            inst.label.toLowerCase().includes('corporate')
+                          const hostInfo = runtime.data?.hosts?.find((h) =>
+                            isCorp ? h.id === 'upf-vm2' : h.id === 'upf-vm'
+                          )
+                          const ip =
+                            hostInfo?.ip ||
+                            (isCorp ? '10.210.50.9' : '10.210.50.8')
+                          const sliceName = isCorp
+                            ? 'Slice Corporativo (MEC)'
+                            : 'Slice Internet (eMBB)'
+                          const dnn = isCorp ? 'corporate' : 'internet'
+                          const subnet = isCorp ? '10.46.0.0/16' : '10.45.0.0/16'
+
+                          return (
+                            <div
+                              key={inst.id}
+                              className='rounded-lg border p-3 bg-card/70 space-y-1.5 shadow-sm'
+                            >
+                              <div className='flex items-center justify-between'>
+                                <div className='flex items-center gap-2'>
+                                  <span className='font-bold font-mono text-xs text-foreground'>
+                                    {inst.label}
+                                  </span>
+                                  <Badge
+                                    variant='outline'
+                                    className='text-[9px] font-mono'
+                                  >
+                                    {sliceName}
+                                  </Badge>
+                                </div>
+                                <Badge
+                                  variant={
+                                    inst.status === 'running'
+                                      ? 'default'
+                                      : 'destructive'
+                                  }
+                                  className='text-[9px]'
+                                >
+                                  {inst.status}
+                                </Badge>
+                              </div>
+                              <div className='grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] font-mono pt-1 text-muted-foreground'>
+                                <div>
+                                  <span className='text-foreground font-semibold'>
+                                    IP N4/N3:
+                                  </span>{' '}
+                                  {ip}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-semibold'>
+                                    DNN:
+                                  </span>{' '}
+                                  {dnn}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-semibold'>
+                                    Subred:
+                                  </span>{' '}
+                                  {subnet}
+                                </div>
+                                <div>
+                                  <span className='text-foreground font-semibold'>
+                                    Host VM:
+                                  </span>{' '}
+                                  {inst.node_id}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
                     {componentAlarms.length > 0 && (
                       <div className='mx-4 mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs'>
                         <div className='flex items-center justify-between'>
                           <div className='flex items-center gap-1.5 font-semibold text-destructive'>
                             <AlertTriangle className='size-3.5' />
                             <span>
-                              Incidentes Telco Activos ({componentAlarms.length}
-                              )
+                              Incidentes Telco Activos ({componentAlarms.length})
                             </span>
                           </div>
                           <Link
@@ -397,28 +512,56 @@ function Detail({
 function HostDetail({
   runtime,
   components,
+  selectedHostId,
 }: {
   runtime?: RuntimeSnapshot
   components: ScenarioStatus['components']
+  selectedHostId?: string
 }) {
+  const host = runtime?.hosts?.find((h) => h.id === selectedHostId)
+  const title = host?.hostname ?? runtime?.hostname ?? 'Host del testbed'
+  const role = host?.role ?? `Vista física obtenida por ${runtime?.source ?? 'fuente desconocida'}`
+  const ifaces = host?.interfaces ?? runtime?.interfaces ?? []
+  const ports = host?.listening_ports ?? runtime?.listening_ports ?? []
+  const hostComps = host
+    ? components.filter((c) => {
+        if (host.id === 'upf-vm') return c.node_id === 'upf-vm' || c.id === 'upf'
+        if (host.id === 'upf-vm2') return c.node_id === 'upf-vm2' || c.id === 'upf2'
+        if (host.id === 'gnb-vm') return c.node_id === 'gnb-vm' || c.id === 'gnb'
+        if (host.id === 'ue-vm') return c.node_id === 'ue-vm' || c.id === 'ue'
+        return (
+          c.node_id === 'core' ||
+          (!['upf-vm', 'upf-vm2', 'gnb-vm', 'ue-vm'].includes(c.node_id) &&
+            !['upf', 'upf2', 'gnb', 'ue'].includes(c.id))
+        )
+      })
+    : components
+
   return (
     <>
       <SheetHeader>
-        <SheetTitle>{runtime?.hostname ?? 'Host del testbed'}</SheetTitle>
-        <SheetDescription>
-          Vista física obtenida por {runtime?.source ?? 'fuente desconocida'}
-        </SheetDescription>
+        <div className='flex items-center justify-between gap-2'>
+          <SheetTitle className='font-mono font-bold'>{title}</SheetTitle>
+          {host?.ip && (
+            <Badge variant='outline' className='font-mono text-xs font-semibold'>
+              {host.ip}
+            </Badge>
+          )}
+        </div>
+        <SheetDescription>{role}</SheetDescription>
       </SheetHeader>
       <ScrollArea className='min-h-0 flex-1 px-4'>
-        <h3 className='mb-2 text-sm font-semibold'>Interfaces Linux</h3>
+        <h3 className='mb-2 text-sm font-semibold'>Interfaces de Red</h3>
         <div className='space-y-2'>
-          {runtime?.interfaces.map((item) => (
-            <div key={item.name} className='rounded-md border p-3'>
-              <div className='flex justify-between'>
-                <b>{item.name}</b>
-                <Badge variant='secondary'>{item.state}</Badge>
+          {ifaces.map((item) => (
+            <div key={item.name} className='rounded-md border p-3 bg-card/60'>
+              <div className='flex justify-between items-center'>
+                <b className='font-mono text-sm'>{item.name}</b>
+                <Badge variant={item.state === 'up' ? 'default' : 'secondary'}>
+                  {item.state}
+                </Badge>
               </div>
-              <p className='mt-1 text-xs text-muted-foreground'>
+              <p className='mt-1 text-xs text-muted-foreground font-mono'>
                 {item.addresses
                   .map(
                     (address) => `${address.address}/${address.prefix_length}`
@@ -428,9 +571,11 @@ function HostDetail({
             </div>
           ))}
         </div>
-        <h3 className='mt-5 mb-2 text-sm font-semibold'>Funciones alojadas</h3>
+        <h3 className='mt-5 mb-2 text-sm font-semibold'>
+          Funciones alojadas en este host ({hostComps.length})
+        </h3>
         <div className='flex flex-wrap gap-2'>
-          {components.map((item) => (
+          {hostComps.map((item) => (
             <Badge
               key={item.id}
               variant={item.status === 'running' ? 'default' : 'destructive'}
@@ -441,8 +586,7 @@ function HostDetail({
         </div>
         <h3 className='mt-5 mb-2 text-sm font-semibold'>Sockets en escucha</h3>
         <p className='text-sm text-muted-foreground'>
-          {runtime?.listening_ports.length ?? 0} endpoints TCP, UDP y SCTP
-          detectados.
+          {ports.length} endpoints de red detectados.
         </p>
       </ScrollArea>
     </>

@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     capture_dir: Path = Path("./data/captures")
     backup_dir: Path = Path("./data/backups")
     allowed_config_roots: list[Path] = [Path("./data/testbed-config")]
-    allowed_interfaces: list[str] = ["lo", "ogstun", "any"]
+    allowed_interfaces: list[str] = ["lo", "ogstun", "enp0s8", "any"]
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_database: str = "open5gs"
     enable_mongo: bool = False
@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     operation_output_limit: int = 100_000
     testbed_host: str | None = None
     ssh_port: int = 22
+    upf_ssh_port: int = 2223
+    upf2_ssh_port: int = 2224
+    gnb_ssh_port: int = 2225
+    ue_ssh_port: int = 2226
     ssh_user: str | None = None
     ssh_key_path: Path | None = None
     ssh_password: str | None = None

@@ -17,8 +17,8 @@ from app.services.scenarios import scenario_manager
 CAPTURE_POINTS = {
     "5g-sa": {
         "n2": {"label": "N2 · AMF ↔ gNodeB", "interface": "lo", "protocol": "ngap", "filter": "sctp port 38412", "procedures": ["NG Setup", "Registration", "PDU Session"]},
-        "n3": {"label": "N3 · UPF ↔ gNodeB", "interface": "lo", "protocol": "gtpu", "filter": "udp port 2152", "procedures": ["Tráfico de usuario"]},
-        "n4": {"label": "N4 · SMF ↔ UPF", "interface": "lo", "protocol": "pfcp", "filter": "udp port 8805", "procedures": ["PFCP Session Establishment"]},
+        "n3": {"label": "N3 · UPF ↔ gNodeB", "interface": "any", "protocol": "gtpu", "filter": "udp port 2152", "procedures": ["Tráfico de usuario"]},
+        "n4": {"label": "N4 · SMF ↔ UPF", "interface": "any", "protocol": "pfcp", "filter": "udp port 8805", "procedures": ["PFCP Session Establishment"]},
         "n6": {"label": "N6 · UPF ↔ Data Network", "interface": "ogstun", "protocol": "ip", "filter": "ip or ip6", "procedures": ["Conectividad de usuario"]},
         "sbi": {"label": "SBI · Service Based Interface", "interface": "lo", "protocol": "sbi", "filter": "tcp port 7777", "procedures": ["Mensajes HTTP/2 entre NFs"]},
     },

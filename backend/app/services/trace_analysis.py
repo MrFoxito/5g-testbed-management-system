@@ -35,6 +35,13 @@ TSHARK_FIELDS = [
     "http2.streamid",
     "http2.headers.method",
     "http2.headers.path",
+    "nas_5gs.mm.suci.scheme_id",
+    "nas_5gs.mm.suci.supi_fmt",
+    "e212.mcc",
+    "e212.mnc",
+    "tcp.stream",
+    "http2.headers.status",
+    "json.value.string",
 ]
 
 
@@ -62,7 +69,13 @@ ADDRESS_TO_NF = {
     "127.0.0.13": "PCF",
     "127.0.0.14": "NSSF",
     "127.0.0.15": "UDR",
+    "127.0.0.20": "BSF",
     "127.0.0.200": "SCP",
+    # Distributed 5G multi-host network endpoints:
+    "10.210.50.10": "gNB",
+    "10.210.50.8": "UPF",
+    "10.210.50.9": "UPF",
+    "10.210.50.11": "UE",
 }
 
 
@@ -202,6 +215,14 @@ def _row_identifiers(
         if msin.isdigit():
             reconstructed = f"{mcc}{mnc}{msin}"
             add("supi", reconstructed)
+    path = row.get("http2.headers.path") or ""
+    if path:
+        imsi_match = re.search(r"imsi-(\d{14,15})", path)
+        if imsi_match:
+            add("supi", imsi_match.group(1))
+        suci_match = re.search(r"suci-0-(\d{3})-(\d{2,3})-\d{4}-0-0-(\d+)", path)
+        if suci_match:
+            add("supi", suci_match.group(1) + suci_match.group(2) + suci_match.group(3))
     for value in _values(row.get("ngap.RAN_UE_NGAP_ID")):
         add("ran_ue_ngap_id", value)
     for value in _values(row.get("ngap.AMF_UE_NGAP_ID")):
@@ -451,6 +472,9 @@ def build_trace_analysis(
     log_markers: dict[str, bool] | None = None,
     tshark_version: str | None = None,
 ) -> dict[str, Any]:
+    if task.get("scenario_id") == "5g-sa":
+        from app.services.trace_release16 import build_release16_analysis
+        return build_release16_analysis(task, tshark_output, tshark_version=tshark_version)
     rows = parse_tshark_rows(tshark_output)
     defaults = task.get("scenario_defaults") or {"mcc": "999", "mnc": "70"}
     mcc, mnc = str(defaults.get("mcc", "999")), str(defaults.get("mnc", "70"))

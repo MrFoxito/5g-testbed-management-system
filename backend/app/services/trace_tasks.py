@@ -23,6 +23,7 @@ from app.services.trace_catalog import (
     subscriber_capture_profile,
 )
 from app.services.trace_repository import trace_repository
+from app.services.trace_release16 import POLICY_VERSION
 
 
 ACTIVE_STATES = {"queued", "preparing", "running", "processing", "stopping"}
@@ -173,6 +174,9 @@ class TraceTaskService:
     def _public(task: dict[str, Any]) -> dict[str, Any]:
         hidden = {"selector_hash", "pid", "remote_path", "remote_log", "device"}
         result = {key: value for key, value in task.items() if key not in hidden}
+        if task.get("scenario_id") == "5g-sa" and task.get("analysis_file") and POLICY_VERSION not in task["analysis_file"]:
+            result["result"] = "unknown"
+            result["outcome"] = "unknown"
         result["target"] = (
             {"kind": task.get("selector_kind"), "masked": task.get("selector_masked")}
             if task.get("selector_kind")
@@ -609,7 +613,7 @@ class TraceTaskService:
                     if remote_filtered:
                         filtered_file = f"{task_id}.filtered.pcap"
                         await adapter.fetch_remote_artifact(remote_filtered, get_settings().capture_dir / filtered_file)
-                analysis_file = f"{task_id}.analysis.json"
+                analysis_file = f"{task_id}.{POLICY_VERSION}.analysis.json" if task["scenario_id"] == "5g-sa" else f"{task_id}.analysis.json"
                 analysis_path = get_settings().capture_dir / analysis_file
                 analysis["artifacts"] = self._artifact_metadata(path, filtered_file, analysis_file)
                 analysis_path.write_text(json.dumps(analysis, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -636,14 +640,14 @@ class TraceTaskService:
 
     async def _process_mock(self, task_id: str) -> None:
         task = trace_repository.get(task_id)
-        analysis_task = {**task, "scenario_defaults": CATALOG[task["scenario_id"]]["defaults"]}
+        analysis_task = {**task, "source": "simulated", "scenario_defaults": CATALOG[task["scenario_id"]]["defaults"]}
         analysis = build_trace_analysis(
             analysis_task,
             self._mock_tshark_output(),
             log_markers={"registration": True, "pdu_session": True},
             tshark_version="TShark simulated",
         )
-        analysis_file = f"{task_id}.analysis.json"
+        analysis_file = f"{task_id}.{POLICY_VERSION}.analysis.json" if task["scenario_id"] == "5g-sa" else f"{task_id}.analysis.json"
         analysis_path = get_settings().capture_dir / analysis_file
         analysis["artifacts"] = self._artifact_metadata(
             get_settings().capture_dir / task["pcap_file"], None, analysis_file
@@ -738,16 +742,20 @@ class TraceTaskService:
 
     @staticmethod
     def _analyze_local(path: Path) -> tuple[str, str]:
-        if not shutil.which("tshark"):
+        executable = shutil.which("tshark")
+        windows_tshark = Path("C:/Program Files/Wireshark/tshark.exe")
+        if not executable and windows_tshark.is_file():
+            executable = str(windows_tshark)
+        if not executable:
             return "", "tshark unavailable"
         command = [
-            "tshark", "-n", "-r", str(path), "-c", "10000", "-d", "tcp.port==7777,http2", "-T", "fields",
+            executable, "-n", "-r", str(path), "-c", "10000", "-d", "tcp.port==7777,http2", "-T", "fields",
             "-E", "separator=/t", "-E", "quote=d", "-E", "occurrence=a", "-E", "aggregator=,",
         ]
         for field in TSHARK_FIELDS:
             command.extend(["-e", field])
         output = subprocess.run(command, capture_output=True, text=True, timeout=60, check=True).stdout
-        version = subprocess.run(["tshark", "--version"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()[0]
+        version = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()[0]
         return output, version
 
     @staticmethod
@@ -792,6 +800,8 @@ class TraceTaskService:
         if task.get("analysis_file"):
             try:
                 analysis = await self.analysis(task_id, user)
+                result["outcome"] = analysis["outcome"]
+                result["result"] = analysis["result"]
                 result["analysis_summary"] = {
                     "outcome": analysis["outcome"],
                     "correlation_status": analysis["correlation_status"],
@@ -833,11 +843,73 @@ class TraceTaskService:
         if not task.get("analysis_file"):
             raise FileNotFoundError("La tarea no dispone de análisis")
         path = (get_settings().capture_dir / task["analysis_file"]).resolve()
-        if not path.is_relative_to(get_settings().capture_dir.resolve()) or not path.exists():
+        if not path.is_relative_to(get_settings().capture_dir.resolve()):
             raise FileNotFoundError("El análisis no está disponible")
-        return json.loads(path.read_text(encoding="utf-8"))
+        if not path.exists():
+            capture_p = (get_settings().capture_dir / task.get("pcap_file", "")).resolve()
+            if not capture_p.exists():
+                raise FileNotFoundError("El análisis no está disponible")
+            analysis = {}
+        else:
+            try:
+                analysis = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                analysis = {}
+        if task.get("scenario_id") != "5g-sa" and analysis:
+            return analysis
+        from app.services.trace_release16 import POLICY_VERSION
+        if analysis.get("analysis_policy") == POLICY_VERSION:
+            return analysis
+        # Preserve the original PCAP and legacy JSON. Reinterpret actual packet
+        # evidence, never "repair" old inferred events by renaming them.
+        lock = self.locks.setdefault(task_id, asyncio.Lock())
+        async with lock:
+            filename = f"{task_id}.{POLICY_VERSION}.analysis.json"
+            reviewed_path = get_settings().capture_dir / filename
+            if reviewed_path.exists():
+                return json.loads(reviewed_path.read_text(encoding="utf-8"))
+            adapter = scenario_manager.adapter
+            capture = (get_settings().capture_dir / task["pcap_file"]).resolve()
+            if not capture.is_relative_to(get_settings().capture_dir.resolve()):
+                raise TraceTaskError("Ruta de captura inválida")
+            if capture.exists() and (shutil.which("tshark") or Path("C:/Program Files/Wireshark/tshark.exe").is_file()) and task.get("source") not in {"mock", "simulated"}:
+                output, version = await asyncio.to_thread(self._analyze_local, capture)
+            elif task.get("source") == "remote" and isinstance(adapter, RemoteExecutionAdapter):
+                output, version = await adapter.analyze_remote_capture(task_id)
+            elif task.get("source") in {"mock", "simulated"}:
+                output, version = self._mock_tshark_output(), "TShark simulated"
+            else:
+                capture = (get_settings().capture_dir / task["pcap_file"]).resolve()
+                if not capture.is_relative_to(get_settings().capture_dir.resolve()):
+                    raise TraceTaskError("Ruta de captura inválida")
+                output, version = await asyncio.to_thread(self._analyze_local, capture)
+                if version == "tshark unavailable":
+                    raise TraceTaskError("Se requiere TShark para revisar esta captura con la política Release 16")
+            reviewed = build_trace_analysis({**task, "scenario_defaults": CATALOG["5g-sa"]["defaults"]},
+                output, tshark_version=version)
+            filtered_file = None
+            executable = shutil.which("tshark") or ("C:/Program Files/Wireshark/tshark.exe" if Path("C:/Program Files/Wireshark/tshark.exe").is_file() else None)
+            frames = sorted({e["packet_number"] for e in reviewed["events"] if e.get("packet_number")})
+            if task.get("trace_type") == "subscriber" and frames and capture.exists() and executable and task.get("source") not in {"mock", "simulated"}:
+                filtered_file = f"{task_id}.{POLICY_VERSION}.filtered.pcap"
+                display_filter = " or ".join(f"frame.number=={n}" for n in frames)
+                try:
+                    await asyncio.to_thread(subprocess.run, [executable, "-r", str(capture),
+                        "-Y", display_filter,
+                        "-w", str((get_settings().capture_dir / filtered_file).resolve())],
+                        capture_output=True, timeout=60, check=True)
+                except subprocess.CalledProcessError:
+                    filtered_file = None
+            reviewed["artifacts"] = self._artifact_metadata(capture, filtered_file, filename)
+            reviewed["supersedes_analysis"] = task["analysis_file"]
+            reviewed_path.write_text(json.dumps(reviewed, indent=2, ensure_ascii=False), encoding="utf-8")
+            trace_repository.replace_events(task_id, reviewed["events"])
+            trace_repository.update(task_id, analysis_file=filename, filtered_file=filtered_file, result=reviewed["result"])
+            return reviewed
 
     async def artifact(self, task_id: str, artifact: str, user: UserPublic) -> tuple[Path, str, str]:
+        if artifact == "evidence":
+            await self.analysis(task_id, user)
         task = await self.refresh(task_id)
         self._assert_access(task, user)
         if task["status"] in ACTIVE_STATES:

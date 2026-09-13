@@ -3,7 +3,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? '/api/v1',
-  timeout: 15_000,
+  timeout: 45_000,
 })
 
 api.interceptors.request.use((config) => {
@@ -77,9 +77,30 @@ export type Metrics = {
   }[]
   rrc?: { available: boolean; reason?: string }
 }
+export type HostSnapshot = {
+  id: string
+  hostname: string
+  ip?: string
+  role?: string
+  port?: number
+  interfaces: {
+    name: string
+    state: string
+    mtu: number | null
+    addresses: {
+      family: string
+      address: string
+      prefix_length: number
+      scope: string
+    }[]
+  }[]
+  listening_ports: { protocol: string; address: string; port: number }[]
+}
+
 export type RuntimeSnapshot = {
   source: 'mock' | 'local' | 'remote'
   hostname: string
+  hosts?: HostSnapshot[]
   interfaces: {
     name: string
     state: string

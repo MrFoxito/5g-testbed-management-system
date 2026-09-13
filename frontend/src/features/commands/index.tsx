@@ -247,6 +247,7 @@ export function CommandsPage() {
   }
 
   const allMmlSuggestions = useMemo(() => {
+    const targetComponents = currentComponent ? [currentComponent] : components
     const list: {
       code: string
       syntax: string
@@ -255,7 +256,7 @@ export function CommandsPage() {
       isCurrentNode: boolean
     }[] = []
 
-    for (const comp of components) {
+    for (const comp of targetComponents) {
       for (const op of comp.operations) {
         const code = operationCode(op, comp)
         const defaults = parameterDefaults(op)
@@ -267,7 +268,7 @@ export function CommandsPage() {
           syntax,
           operation: op,
           component: comp,
-          isCurrentNode: comp.id === currentComponent?.id,
+          isCurrentNode: true,
         })
       }
     }

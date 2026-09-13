@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   Background,
   Controls,
   Handle,
+  MarkerType,
   Position,
   ReactFlow,
   useEdgesState,
@@ -68,7 +69,8 @@ const telcoPositions4G: Record<string, { x: number; y: number }> = {
   ue: { x: 60, y: 380 },
   enb: { x: 380, y: 380 },
   sgwu: { x: 720, y: 380 },
-  upf: { x: 1040, y: 380 },
+  upf: { x: 1040, y: 280 },
+  upf2: { x: 1040, y: 440 },
 }
 
 // Mapeo unívoco y sobrio de interfaces 3GPP
@@ -107,7 +109,7 @@ function getComponentIcon(id: string) {
   if (id === 'gnb' || id === 'enb') {
     return <Radio className='h-6 w-6 text-indigo-500 mb-1' />
   }
-  if (id === 'upf' || id === 'sgwu') {
+  if (id === 'upf' || id === 'upf2' || id === 'sgwu') {
     return <Router className='h-6 w-6 text-emerald-500 mb-1' />
   }
   if (id === 'mongodb') {
@@ -200,8 +202,74 @@ function TelcoNode({ data }: NodeProps) {
   )
 }
 
+function HostNode({ data }: NodeProps) {
+  const isHealthy = data.healthy !== false
+  const ledStyle = isHealthy
+    ? 'bg-emerald-500 shadow-[0_0_6px_#10b981]'
+    : 'bg-red-500 shadow-[0_0_6px_#ef4444]'
+
+  const rawLabel = String(data.label || '')
+  let shortTitle = rawLabel
+  if (data.id === 'ue-vm' || rawLabel.includes('ue-01')) shortTitle = 'EMS-UE-01'
+  else if (data.id === 'gnb-vm' || rawLabel.includes('gnb-01')) shortTitle = 'EMS-GNB-01'
+  else if (data.id === 'core' || rawLabel.includes('testbed')) shortTitle = 'EMS-CORE'
+  else if (data.id === 'upf-vm' || rawLabel.includes('upf-01')) shortTitle = 'EMS-UPF-01'
+  else if (data.id === 'upf-vm2' || rawLabel.includes('upf-02')) shortTitle = 'EMS-UPF-02'
+
+  let shortRole = String(data.role || 'Host VM')
+  if (data.id === 'ue-vm') shortRole = 'UE (Dual PDU)'
+  else if (data.id === 'gnb-vm') shortRole = 'gNodeB (RAN)'
+  else if (data.id === 'core') shortRole = '5G Core (CP)'
+  else if (data.id === 'upf-vm') shortRole = 'UPF (Internet)'
+  else if (data.id === 'upf-vm2') shortRole = 'UPF (Corporate)'
+
+  return (
+    <div
+      className='relative flex flex-col justify-between rounded-xl border-2 px-3.5 py-2.5 transition-all duration-200 select-none shadow-sm bg-card border-border hover:border-primary text-card-foreground cursor-pointer hover:shadow-md'
+      style={{ width: 195, minHeight: 82 }}
+    >
+      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap((position) =>
+        (['source', 'target'] as const).map((type) => (
+          <Handle
+            key={`${type}-${position}`}
+            id={`${type}-${String(position).toLowerCase()}`}
+            type={type}
+            position={position}
+            className='!w-2 !h-2 !bg-primary/50 !border-card'
+          />
+        ))
+      )}
+
+      <div className='flex items-center justify-between gap-1.5'>
+        <div className='flex items-center gap-2 min-w-0'>
+          <Server className='h-4 w-4 text-indigo-400 shrink-0' />
+          <div className='truncate'>
+            <span className='text-sm font-black font-mono text-foreground leading-tight block truncate'>
+              {shortTitle}
+            </span>
+            <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-wider truncate mt-0.5'>
+              {shortRole}
+            </p>
+          </div>
+        </div>
+        <span className={`h-2.5 w-2.5 rounded-full ${ledStyle} shrink-0`} />
+      </div>
+
+      <div className='flex items-center justify-between gap-1 mt-2 pt-1.5 border-t border-border/50 text-[10px] font-mono font-semibold'>
+        <span className='px-1.5 py-0.5 rounded bg-muted text-muted-foreground truncate'>
+          {String(data.ip || 'Sin IP')}
+        </span>
+        <span className='px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0'>
+          {String(data.nfSummary || '')}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 const nodeTypes = {
   telcoNode: TelcoNode,
+  hostNode: HostNode,
 }
 
 function telcoElements(
@@ -211,16 +279,62 @@ function telcoElements(
   const is5g = components.some((c) => c.id === 'amf' || c.id === 'gnb')
   const posMap = is5g ? telcoPositions5G : telcoPositions4G
 
-  const nodes: Node[] = components.map((component, idx) => {
+  // En la vista lógica 3GPP, colapsamos instancias del plano de usuario (ej. 2 UPFs)
+  // en un único nodo arquitectural para mantener un diagrama canónico sin telarañas.
+  const upfComps = components.filter(
+    (c) => c.id === 'upf' || c.id === 'upf2' || c.kind === 'user-plane'
+  )
+  const hasMultipleUpfs = is5g && upfComps.length > 1
+
+  let displayComponents: ComponentStatus[] = []
+  if (hasMultipleUpfs) {
+    const nonUpfs = components.filter(
+      (c) => !(c.id === 'upf' || c.id === 'upf2' || c.kind === 'user-plane')
+    )
+    const allRunning = upfComps.every((c) => c.status === 'running')
+    const aggregatedUpf: ComponentStatus = {
+      id: 'upf',
+      label: 'UPF',
+      kind: 'user-plane',
+      node_id: 'upf-cluster',
+      unit: 'open5gs-upfd',
+      interfaces: ['N3', 'N4', 'N6'],
+      status: allRunning ? 'running' : 'stopped',
+      procedures: [
+        'Plano de Usuario Desagregado (CUPS)',
+        'Soporte Multi-Slice: Internet (eMBB) + Corporativo (MEC)',
+      ],
+      expected_endpoints: upfComps.flatMap((c) => c.expected_endpoints || []),
+      config_paths: ['/etc/open5gs/upf.yaml'],
+      depends_on: ['smf'],
+    }
+    displayComponents = [...nonUpfs, aggregatedUpf]
+  } else {
+    displayComponents = components
+  }
+
+  const nodes: Node[] = displayComponents.map((component, idx) => {
     const defaultPos = { x: 50 + (idx % 4) * 200, y: Math.floor(idx / 4) * 120 }
     const pos = posMap[component.id] ?? defaultPos
 
-    const compAlarms = (alarms ?? []).filter(
-      (a) =>
+    const compAlarms = (alarms ?? []).filter((a) => {
+      if (component.id === 'upf' && hasMultipleUpfs) {
+        return upfComps.some(
+          (u) =>
+            a.component === u.id ||
+            a.component?.toLowerCase() === u.id.toLowerCase() ||
+            (a.node_id &&
+              (a.node_id === u.node_id ||
+                a.node_id === 'upf-vm' ||
+                a.node_id === 'upf-vm2'))
+        )
+      }
+      return (
         a.component === component.id ||
         a.component?.toLowerCase() === component.id.toLowerCase() ||
         (a.node_id && a.node_id === component.node_id)
-    )
+      )
+    })
     const hasCritical = compAlarms.some((a) => a.severity === 'critical')
     const hasMajor = compAlarms.some((a) => a.severity === 'major')
     const hasMinor = compAlarms.some((a) => a.severity === 'minor')
@@ -235,6 +349,11 @@ function telcoElements(
             ? 'warning'
             : null
 
+    const subtitle =
+      component.id === 'upf' && hasMultipleUpfs
+        ? `${upfComps.length} Instancias (Internet + Corp)`
+        : undefined
+
     return {
       id: component.id,
       type: 'telcoNode',
@@ -245,6 +364,7 @@ function telcoElements(
         label: component.label,
         kind: component.kind,
         status: component.status,
+        subtitle,
         alarmSeverity: highestSeverity,
         alarmCount: compAlarms.length,
       },
@@ -306,10 +426,16 @@ function telcoElements(
       id: key,
       source: link.from,
       target: link.to,
-      sourceHandle: `source-${sourceSide}`,
-      targetHandle: `target-${targetSide}`,
+      sourceHandle: `source-${String(sourceSide).toLowerCase()}`,
+      targetHandle: `target-${String(targetSide).toLowerCase()}`,
       type: 'straight',
       animated: false,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 14,
+        height: 14,
+        color: 'var(--muted-foreground)',
+      },
       label: info.label,
       labelStyle: {
         fontSize: 10,
@@ -339,27 +465,219 @@ function physicalElements(
   runtime?: RuntimeSnapshot
 ) {
   if (!runtime) return { nodes: [], edges: [] }
-  const active = components.filter((component) => component.status === 'running')
-    .length
+
+  const rawHosts = runtime.hosts && runtime.hosts.length > 1
+    ? runtime.hosts
+    : null
+
+  if (rawHosts) {
+    const nodes: Node[] = rawHosts.map((host, idx) => {
+      const hostComps = components.filter((c) => {
+        if (host.id === 'upf-vm') return c.node_id === 'upf-vm' || c.id === 'upf'
+        if (host.id === 'upf-vm2') return c.node_id === 'upf-vm2' || c.id === 'upf2'
+        if (host.id === 'gnb-vm') return c.node_id === 'gnb-vm' || c.id === 'gnb'
+        if (host.id === 'ue-vm') return c.node_id === 'ue-vm' || c.id === 'ue'
+        return (
+          c.node_id === 'core' ||
+          (!['upf-vm', 'upf-vm2', 'gnb-vm', 'ue-vm'].includes(c.node_id) &&
+            !['upf', 'upf2', 'gnb', 'ue'].includes(c.id))
+        )
+      })
+      const active = hostComps.filter((c) => c.status === 'running').length
+      const healthy = active === hostComps.length && hostComps.length > 0
+
+      // Layout amplio y proporcional sin solapamiento
+      let pos = { x: 80 + idx * 300, y: 190 }
+      if (rawHosts.length === 5) {
+        if (host.id === 'ue-vm') pos = { x: 60, y: 200 }
+        else if (host.id === 'gnb-vm') pos = { x: 380, y: 200 }
+        else if (host.id === 'core') pos = { x: 700, y: 200 }
+        else if (host.id === 'upf-vm') pos = { x: 1020, y: 90 }
+        else if (host.id === 'upf-vm2') pos = { x: 1020, y: 310 }
+      } else if (rawHosts.length === 3) {
+        if (idx === 0) pos = { x: 80, y: 190 }
+        else if (idx === 1) pos = { x: 680, y: 90 }
+        else if (idx === 2) pos = { x: 680, y: 310 }
+      }
+
+      const defaultRole =
+        host.id === 'ue-vm'
+          ? 'UE (Dual PDU)'
+          : host.id === 'gnb-vm'
+            ? 'gNodeB (RAN)'
+            : host.id === 'upf-vm2'
+              ? 'UPF (Corporate)'
+              : host.id === 'upf-vm'
+                ? 'UPF (Internet)'
+                : '5G Core (CP)'
+
+      const defaultIp =
+        host.id === 'ue-vm'
+          ? '10.210.50.11'
+          : host.id === 'gnb-vm'
+            ? '10.210.50.10'
+            : host.id === 'upf-vm2'
+              ? '10.210.50.9'
+              : host.id === 'upf-vm'
+                ? '10.210.50.8'
+                : '10.210.50.1'
+
+      return {
+        id: host.id,
+        type: 'hostNode',
+        position: pos,
+        data: {
+          selectionType: 'host',
+          id: host.id,
+          label: host.hostname,
+          role: defaultRole,
+          ip: host.ip || defaultIp,
+          nfSummary: `${active}/${hostComps.length} NFs activas`,
+          healthy,
+        },
+      }
+    })
+
+    const edges: Edge[] = []
+    if (rawHosts.length === 5) {
+      const links = [
+        {
+          id: 'phys-ue-gnb',
+          source: 'ue-vm',
+          target: 'gnb-vm',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          label: 'Radio Sim',
+          stroke: '#38bdf8',
+        },
+        {
+          id: 'phys-gnb-core',
+          source: 'gnb-vm',
+          target: 'core',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          label: 'N2 (NGAP)',
+          stroke: 'var(--primary)',
+        },
+        {
+          id: 'phys-core-upf1',
+          source: 'core',
+          target: 'upf-vm',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          label: 'N4 (Internet)',
+          stroke: '#10b981',
+        },
+        {
+          id: 'phys-core-upf2',
+          source: 'core',
+          target: 'upf-vm2',
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          label: 'N4 (Corporate)',
+          stroke: '#06b6d4',
+        },
+      ]
+
+      for (const link of links) {
+        edges.push({
+          id: link.id,
+          source: link.source,
+          target: link.target,
+          sourceHandle: link.sourceHandle,
+          targetHandle: link.targetHandle,
+          type: 'straight',
+          animated: false,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 14,
+            height: 14,
+            color: link.stroke,
+          },
+          label: link.label,
+          labelStyle: {
+            fontSize: 10,
+            fontWeight: 700,
+            fill: 'var(--foreground)',
+            fontFamily: 'ui-monospace, monospace',
+          },
+          labelBgPadding: [6, 3],
+          labelBgBorderRadius: 6,
+          labelBgStyle: {
+            fill: 'var(--card)',
+            stroke: 'var(--border)',
+            strokeWidth: 1.5,
+          },
+          style: {
+            stroke: link.stroke,
+            strokeWidth: 2,
+          },
+        })
+      }
+    } else {
+      const coreHost = rawHosts[0]
+      for (let i = 1; i < rawHosts.length; i++) {
+        const targetHost = rawHosts[i]
+        const isUpf2 = targetHost.id === 'upf-vm2' || targetHost.ip === '10.210.50.9'
+        const color = isUpf2 ? '#06b6d4' : 'var(--primary)'
+        edges.push({
+          id: `host-link-${targetHost.id}`,
+          source: coreHost.id,
+          target: targetHost.id,
+          sourceHandle: 'source-right',
+          targetHandle: 'target-left',
+          type: 'straight',
+          animated: false,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 14,
+            height: 14,
+            color,
+          },
+          label: isUpf2
+            ? 'N4 (Corporate)'
+            : 'N4 (Internet)',
+          labelStyle: {
+            fontSize: 10,
+            fontWeight: 700,
+            fill: 'var(--foreground)',
+            fontFamily: 'ui-monospace, monospace',
+          },
+          labelBgPadding: [6, 3],
+          labelBgBorderRadius: 6,
+          labelBgStyle: {
+            fill: 'var(--card)',
+            stroke: 'var(--border)',
+            strokeWidth: 1.5,
+          },
+          style: {
+            stroke: color,
+            strokeWidth: 2,
+          },
+        })
+      }
+    }
+
+    return { nodes, edges }
+  }
+
+  const active = components.filter((component) => component.status === 'running').length
   const address = runtime.interfaces
     .flatMap((item) => item.addresses)
     .find((item) => item.family === 'inet' && !item.address.startsWith('127.'))
+
   const node: Node = {
     id: runtime.hostname,
+    type: 'hostNode',
     position: { x: 320, y: 180 },
     data: {
       selectionType: 'host',
-      label: `${runtime.hostname} · ${address?.address ?? 'sin IP'} · ${active}/${components.length} NFs`,
-    },
-    style: {
-      width: 280,
-      padding: 24,
-      borderRadius: 12,
-      borderWidth: 2,
-      borderColor: active === components.length ? 'var(--primary)' : 'var(--destructive)',
-      background: 'var(--card)',
-      color: 'var(--card-foreground)',
-      fontWeight: 600,
+      id: runtime.hostname,
+      label: runtime.hostname,
+      role: 'Host Testbed',
+      ip: address?.address ?? 'Sin IP',
+      nfSummary: `${active}/${components.length} NFs activas`,
+      healthy: active === components.length,
     },
   }
   return { nodes: [node], edges: [] }
@@ -381,12 +699,19 @@ export function EmsTopology({
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
+  const prevViewRef = useRef(view)
   useEffect(() => {
+    const isViewChange = prevViewRef.current !== view
+    prevViewRef.current = view
+
     const next =
       view === 'physical'
         ? physicalElements(components, runtime)
         : telcoElements(components, alarms)
     setNodes((current) => {
+      if (isViewChange) {
+        return next.nodes
+      }
       const positions = new Map(current.map((node) => [node.id, node.position]))
       return next.nodes.map((node) => ({
         ...node,
