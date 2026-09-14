@@ -532,6 +532,14 @@ class TraceTaskService:
         await asyncio.sleep(0.75)
         await scenario_manager.stop_component("5g-sa", "ue")
         await asyncio.sleep(0.5)
+        # Restart gNB as well to ensure clean N2/NGAP association if AMF was restarted
+        try:
+            await scenario_manager.stop_component("5g-sa", "gnb")
+            await asyncio.sleep(0.5)
+            await scenario_manager.start_component("5g-sa", "gnb")
+            await asyncio.sleep(1.5)
+        except Exception:
+            pass
         await scenario_manager.start_component("5g-sa", "ue")
         status = ""
         for _ in range(12):

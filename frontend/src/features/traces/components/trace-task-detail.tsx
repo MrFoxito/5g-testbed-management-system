@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   Square,
   Trash2,
+  Wrench,
 } from 'lucide-react'
 import type { Role } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -1158,53 +1159,42 @@ export function TraceTaskDetailView({
     (role === 'admin' ||
       role === 'teacher' ||
       (!!task.owner && task.owner === currentUsername))
-  const events = analysis?.events ?? []
+  const isTroubleshooting =
+    (!analysis?.events || analysis.events.length === 0) &&
+    Boolean(analysis?.troubleshooting_events?.length)
+
+  const events = isTroubleshooting
+    ? (analysis?.troubleshooting_events ?? [])
+    : (analysis?.events ?? [])
+
+  const participants = isTroubleshooting
+    ? (analysis?.troubleshooting_participants ?? analysis?.participants)
+    : analysis?.participants
 
   return (
-    <div className='flex flex-col gap-5'>
+    <div className='flex min-h-0 flex-col gap-3'>
       {/* Barra Superior con Navegación y Acciones */}
-      <div className='flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-xs sm:p-5 lg:flex-row lg:items-center lg:justify-between'>
-        <div className='min-w-0'>
-          <div className='flex flex-wrap items-center gap-2.5'>
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={onBack}
-              className='gap-1.5 font-semibold shadow-xs hover:bg-muted'
-              title='Volver a la lista de tareas'
-            >
-              <ArrowLeft className='h-4 w-4' />
-              <span>Volver a Trazas</span>
-            </Button>
-            <h2 className='truncate text-xl font-bold tracking-tight text-foreground'>
-              {task?.name ?? 'Detalle de tarea'}
-            </h2>
-            {task && <TraceStatusBadge status={task.status} />}
-            {task && (
-              <TraceOutcomeBadge
-                outcome={analysis?.outcome ?? task.outcome ?? task.result}
-              />
-            )}
-          </div>
-          <div className='mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground'>
-            <span className='font-mono font-medium'>
-              {task ? shortId(task.id) : 'Consultando…'}
-            </span>
-            {task?.owner && (
-              <>
-                <span>·</span>
-                <span>
-                  creada por <strong>{task.owner}</strong>
-                </span>
-              </>
-            )}
-            {task?.created_at && (
-              <>
-                <span>·</span>
-                <span>{formatTimestamp(task.created_at)}</span>
-              </>
-            )}
-          </div>
+      <div className='flex min-h-14 items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 shadow-xs sm:px-4'>
+        <div className='flex min-w-0 items-center gap-3'>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={onBack}
+            className='size-8 shrink-0'
+            title='Volver a la lista de tareas'
+            aria-label='Volver a Trazas'
+          >
+            <ArrowLeft className='h-4 w-4' />
+          </Button>
+          <div className='h-6 w-px shrink-0 bg-border' />
+          <h2 className='truncate text-base font-semibold tracking-tight text-foreground sm:text-lg'>
+            {task?.name ?? 'Detalle de tarea'}
+          </h2>
+          {task && (
+            <TraceOutcomeBadge
+              outcome={analysis?.outcome ?? task.outcome ?? task.result}
+            />
+          )}
         </div>
 
         {task && (
@@ -1271,7 +1261,7 @@ export function TraceTaskDetailView({
       {isLoading || !task ? (
         <DetailSkeleton />
       ) : (
-        <div className='space-y-5'>
+        <div className='space-y-3'>
           {analysisError && (
             <Alert variant='destructive'>
               <ShieldAlert />
@@ -1283,10 +1273,23 @@ export function TraceTaskDetailView({
             </Alert>
           )}
 
-          <div className='space-y-4'>
+          <div className='space-y-3'>
+            {isTroubleshooting && (
+              <div className='flex items-start gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-amber-900 dark:text-amber-200'>
+                <Wrench className='mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400' />
+                <div className='min-w-0 flex-1 space-y-1 text-xs sm:text-sm'>
+                  <p className='font-semibold text-amber-800 dark:text-amber-300'>
+                    Modo Diagnóstico (Troubleshooting Activo)
+                  </p>
+                  <p className='text-xs text-amber-700/90 dark:text-amber-200/90'>
+                    No se observó tráfico de señalización NAS/RRC vinculado al suscriptor en esta captura (posible fallo de conexión o UE inactivo). Se muestran los {events.length} paquetes de interfaces capturados (PFCP, SBI, SCTP) para permitir el diagnóstico de la red.
+                  </p>
+                </div>
+              </div>
+            )}
             <SequenceDiagram
               events={events}
-              participants={analysis?.participants}
+              participants={participants}
               selectedEventId={selectedEvent?.id}
               onSelectEvent={setSelectedEvent}
             />

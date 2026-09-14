@@ -96,3 +96,19 @@ def test_timer_reference_is_not_runtime_validation():
 def test_explicit_4g_not_routed_to_new_policy():
     a = analyze({"_ws.col.Protocol": "S1AP", "_ws.col.Info": "InitialUEMessage"}, scenario_id="4g-epc")
     assert "analysis_policy" not in a
+
+
+def test_troubleshooting_mode_available_when_subscriber_unmatched():
+    # When subscriber selector is not matched, subscriber events are empty (strict privacy/correlation),
+    # but troubleshooting_events are provided so network issues can be diagnosed.
+    a = analyze(
+        {"_ws.col.Protocol": "PFCP", "_ws.col.Info": "PFCP Association Setup Request", "ip.src": "127.0.0.4", "ip.dst": "10.210.50.8"},
+        selector_hash=subscriber_hash("999700000000001"), selector_kind="imsi",
+    )
+    assert a["outcome"] == "inconclusive"
+    assert not a["events"]
+    assert a["troubleshooting_active"] is True
+    assert len(a["troubleshooting_events"]) == 1
+    assert a["troubleshooting_events"][0]["troubleshooting"] is True
+    assert any(d["title"] == "Modo Diagnóstico (Troubleshooting Activo)" for d in a["diagnostics"])
+

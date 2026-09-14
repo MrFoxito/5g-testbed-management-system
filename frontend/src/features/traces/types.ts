@@ -282,6 +282,9 @@ export type TraceAnalysis = {
   procedures?: TraceProcedure[]
   participants?: Array<TraceParticipant | string>
   events?: TraceEvent[]
+  troubleshooting_active?: boolean
+  troubleshooting_events?: TraceEvent[]
+  troubleshooting_participants?: Array<TraceParticipant | string>
   diagnostics?: TraceDiagnostic[]
   artifacts?: TraceArtifact[]
 }

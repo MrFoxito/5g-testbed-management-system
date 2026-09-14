@@ -14,14 +14,9 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import {
-  Database,
-  Radio,
-  Router,
-  Server,
-  Smartphone,
-} from 'lucide-react'
+import { Database, Radio, Router, Server, Smartphone } from 'lucide-react'
 import type { ComponentStatus, RuntimeSnapshot } from '@/lib/api'
+import { alarmBelongsToComponent } from './topology-alarm'
 
 export type TopologyView = 'physical' | 'telco'
 export type TopologySelection =
@@ -104,18 +99,26 @@ const specificTelcoEdges: Record<string, { label: string; stroke: string }> = {
 
 function getComponentIcon(id: string) {
   if (id === 'ue') {
-    return <Smartphone className='h-6 w-6 text-sky-500 mb-1' />
+    return <Smartphone className='mb-1 h-6 w-6 text-sky-500' />
   }
   if (id === 'gnb' || id === 'enb') {
-    return <Radio className='h-6 w-6 text-indigo-500 mb-1' />
+    return <Radio className='mb-1 h-6 w-6 text-indigo-500' />
   }
   if (id === 'upf' || id === 'upf2' || id === 'sgwu') {
-    return <Router className='h-6 w-6 text-emerald-500 mb-1' />
+    return <Router className='mb-1 h-6 w-6 text-emerald-500' />
   }
   if (id === 'mongodb') {
-    return <Database className='h-6 w-6 text-amber-500 mb-1' />
+    return <Database className='mb-1 h-6 w-6 text-amber-500' />
   }
-  return <Server className='h-5 w-5 text-purple-400/80 mb-1' />
+  return <Server className='mb-1 h-5 w-5 text-purple-400/80' />
+}
+
+function severityLabel(severity?: string) {
+  if (severity === 'critical') return 'Crítica'
+  if (severity === 'major') return 'Mayor'
+  if (severity === 'minor') return 'Menor'
+  if (severity === 'warning') return 'Aviso'
+  return 'Incidencia'
 }
 
 // Componente de nodo limpio, sobrio y profesional con icono nativo de telecomunicaciones
@@ -133,15 +136,15 @@ function TelcoNode({ data }: NodeProps) {
 
   if (!isRunning) {
     containerStyle =
-      'bg-destructive/10 border-destructive text-destructive shadow-lg animate-pulse'
+      'bg-destructive/8 border-destructive text-card-foreground shadow-md'
     ledStyle = 'bg-red-500 shadow-[0_0_8px_#ef4444]'
   } else if (alarmSeverity === 'critical') {
     containerStyle =
-      'bg-destructive/10 border-red-500 ring-2 ring-red-500/40 text-card-foreground shadow-md'
-    ledStyle = 'bg-red-500 shadow-[0_0_8px_#ef4444] animate-ping'
+      'bg-destructive/8 border-red-500 ring-1 ring-red-500/30 text-card-foreground shadow-md'
+    ledStyle = 'bg-red-500 shadow-[0_0_8px_#ef4444]'
   } else if (alarmSeverity === 'major') {
     containerStyle =
-      'bg-amber-500/10 border-amber-500 ring-2 ring-amber-500/30 text-card-foreground shadow-md'
+      'bg-amber-500/8 border-amber-500 ring-1 ring-amber-500/25 text-card-foreground shadow-md'
     ledStyle = 'bg-amber-500 shadow-[0_0_8px_#f59e0b]'
   } else if (alarmSeverity === 'minor' || alarmSeverity === 'warning') {
     containerStyle =
@@ -151,38 +154,43 @@ function TelcoNode({ data }: NodeProps) {
 
   return (
     <div
-      className={`relative flex flex-col items-center justify-center rounded-2xl border-2 px-5 py-3.5 transition-all duration-200 select-none shadow-sm ${containerStyle}`}
+      className={`relative flex flex-col items-center justify-center rounded-2xl border-2 px-5 py-3.5 shadow-sm transition-all duration-200 select-none ${containerStyle}`}
       style={{ minWidth: 140, minHeight: 74 }}
     >
       {/* Handles para conexiones limpias */}
-      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap((position) =>
-        (['source', 'target'] as const).map((type) => (
-          <Handle
-            key={`${type}-${position}`}
-            id={`${type}-${position}`}
-            type={type}
-            position={position}
-            className='!w-2.5 !h-2.5 !bg-primary/50 !border-card'
-          />
-        ))
+      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap(
+        (position) =>
+          (['source', 'target'] as const).map((type) => (
+            <Handle
+              key={`${type}-${position}`}
+              id={`${type}-${position}`}
+              type={type}
+              position={position}
+              className='!h-2.5 !w-2.5 !border-card !bg-primary/50'
+            />
+          ))
       )}
 
       {/* Status LED */}
-      <span className={`absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full ${ledStyle}`} />
+      <span
+        className={`absolute top-2.5 right-2.5 h-2.5 w-2.5 rounded-full ${ledStyle}`}
+      />
 
       {/* Badge de alarma activa si está corriendo pero con incidente telco */}
-      {isRunning && alarmSeverity && alarmCount > 0 && (
+      {(!isRunning || (alarmSeverity && alarmCount > 0)) && (
         <span
-          className={`absolute -top-2.5 -left-1.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-mono font-bold tracking-wider uppercase shadow-md border ${
-            alarmSeverity === 'critical'
-              ? 'bg-red-600 text-white border-red-700 animate-pulse'
+          className={`absolute -top-2.5 -left-1.5 flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[9px] font-bold tracking-wider uppercase shadow-md ${
+            !isRunning || alarmSeverity === 'critical'
+              ? 'border-red-700 bg-red-600 text-white'
               : alarmSeverity === 'major'
-                ? 'bg-amber-500 text-white border-amber-600'
-                : 'bg-yellow-500 text-black border-yellow-600'
+                ? 'border-amber-600 bg-amber-500 text-white'
+                : 'border-yellow-600 bg-yellow-500 text-black'
           }`}
         >
-          <span className='size-1.5 rounded-full bg-white animate-ping' />
-          {alarmSeverity} {alarmCount > 1 ? `(${alarmCount})` : ''}
+          <span className='size-1.5 rounded-full bg-white/90' />
+          {!isRunning
+            ? 'No disponible'
+            : `${severityLabel(alarmSeverity)}${alarmCount > 1 ? ` (${alarmCount})` : ''}`}
         </span>
       )}
 
@@ -190,12 +198,12 @@ function TelcoNode({ data }: NodeProps) {
       {icon}
 
       {/* Gran Nombre de la NF */}
-      <span className='text-base font-black tracking-tight font-mono text-foreground leading-tight'>
+      <span className='font-mono text-base leading-tight font-black tracking-tight text-foreground'>
         {String(data.label)}
       </span>
 
       {/* Rol / Subtítulo discreto */}
-      <span className='mt-0.5 text-[9px] font-bold text-muted-foreground uppercase tracking-widest opacity-80'>
+      <span className='mt-0.5 text-[9px] font-bold tracking-widest text-muted-foreground uppercase opacity-80'>
         {kind}
       </span>
     </div>
@@ -210,11 +218,16 @@ function HostNode({ data }: NodeProps) {
 
   const rawLabel = String(data.label || '')
   let shortTitle = rawLabel
-  if (data.id === 'ue-vm' || rawLabel.includes('ue-01')) shortTitle = 'EMS-UE-01'
-  else if (data.id === 'gnb-vm' || rawLabel.includes('gnb-01')) shortTitle = 'EMS-GNB-01'
-  else if (data.id === 'core' || rawLabel.includes('testbed')) shortTitle = 'EMS-CORE'
-  else if (data.id === 'upf-vm' || rawLabel.includes('upf-01')) shortTitle = 'EMS-UPF-01'
-  else if (data.id === 'upf-vm2' || rawLabel.includes('upf-02')) shortTitle = 'EMS-UPF-02'
+  if (data.id === 'ue-vm' || rawLabel.includes('ue-01'))
+    shortTitle = 'EMS-UE-01'
+  else if (data.id === 'gnb-vm' || rawLabel.includes('gnb-01'))
+    shortTitle = 'EMS-GNB-01'
+  else if (data.id === 'core' || rawLabel.includes('testbed'))
+    shortTitle = 'EMS-CORE'
+  else if (data.id === 'upf-vm' || rawLabel.includes('upf-01'))
+    shortTitle = 'EMS-UPF-01'
+  else if (data.id === 'upf-vm2' || rawLabel.includes('upf-02'))
+    shortTitle = 'EMS-UPF-02'
 
   let shortRole = String(data.role || 'Host VM')
   if (data.id === 'ue-vm') shortRole = 'UE (Dual PDU)'
@@ -225,29 +238,30 @@ function HostNode({ data }: NodeProps) {
 
   return (
     <div
-      className='relative flex flex-col justify-between rounded-xl border-2 px-3.5 py-2.5 transition-all duration-200 select-none shadow-sm bg-card border-border hover:border-primary text-card-foreground cursor-pointer hover:shadow-md'
+      className='relative flex cursor-pointer flex-col justify-between rounded-xl border-2 border-border bg-card px-3.5 py-2.5 text-card-foreground shadow-sm transition-all duration-200 select-none hover:border-primary hover:shadow-md'
       style={{ width: 195, minHeight: 82 }}
     >
-      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap((position) =>
-        (['source', 'target'] as const).map((type) => (
-          <Handle
-            key={`${type}-${position}`}
-            id={`${type}-${String(position).toLowerCase()}`}
-            type={type}
-            position={position}
-            className='!w-2 !h-2 !bg-primary/50 !border-card'
-          />
-        ))
+      {[Position.Top, Position.Bottom, Position.Left, Position.Right].flatMap(
+        (position) =>
+          (['source', 'target'] as const).map((type) => (
+            <Handle
+              key={`${type}-${position}`}
+              id={`${type}-${String(position).toLowerCase()}`}
+              type={type}
+              position={position}
+              className='!h-2 !w-2 !border-card !bg-primary/50'
+            />
+          ))
       )}
 
       <div className='flex items-center justify-between gap-1.5'>
-        <div className='flex items-center gap-2 min-w-0'>
-          <Server className='h-4 w-4 text-indigo-400 shrink-0' />
+        <div className='flex min-w-0 items-center gap-2'>
+          <Server className='h-4 w-4 shrink-0 text-indigo-400' />
           <div className='truncate'>
-            <span className='text-sm font-black font-mono text-foreground leading-tight block truncate'>
+            <span className='block truncate font-mono text-sm leading-tight font-black text-foreground'>
               {shortTitle}
             </span>
-            <p className='text-[10px] font-semibold text-muted-foreground uppercase tracking-wider truncate mt-0.5'>
+            <p className='mt-0.5 truncate text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>
               {shortRole}
             </p>
           </div>
@@ -255,11 +269,11 @@ function HostNode({ data }: NodeProps) {
         <span className={`h-2.5 w-2.5 rounded-full ${ledStyle} shrink-0`} />
       </div>
 
-      <div className='flex items-center justify-between gap-1 mt-2 pt-1.5 border-t border-border/50 text-[10px] font-mono font-semibold'>
-        <span className='px-1.5 py-0.5 rounded bg-muted text-muted-foreground truncate'>
+      <div className='mt-2 flex items-center justify-between gap-1 border-t border-border/50 pt-1.5 font-mono text-[10px] font-semibold'>
+        <span className='truncate rounded bg-muted px-1.5 py-0.5 text-muted-foreground'>
           {String(data.ip || 'Sin IP')}
         </span>
-        <span className='px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0'>
+        <span className='shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-primary'>
           {String(data.nfSummary || '')}
         </span>
       </div>
@@ -286,7 +300,7 @@ function telcoElements(
   )
   const hasMultipleUpfs = is5g && upfComps.length > 1
 
-  let displayComponents: ComponentStatus[] = []
+  let displayComponents: ComponentStatus[]
   if (hasMultipleUpfs) {
     const nonUpfs = components.filter(
       (c) => !(c.id === 'upf' || c.id === 'upf2' || c.kind === 'user-plane')
@@ -329,11 +343,7 @@ function telcoElements(
                 a.node_id === 'upf-vm2'))
         )
       }
-      return (
-        a.component === component.id ||
-        a.component?.toLowerCase() === component.id.toLowerCase() ||
-        (a.node_id && a.node_id === component.node_id)
-      )
+      return alarmBelongsToComponent(a, component)
     })
     const hasCritical = compAlarms.some((a) => a.severity === 'critical')
     const hasMajor = compAlarms.some((a) => a.severity === 'major')
@@ -416,11 +426,19 @@ function telcoElements(
     const targetPosition = nodes.find((node) => node.id === link.to)!.position
     const horizontal = Math.abs(targetPosition.y - sourcePosition.y) < 1
     const sourceSide = horizontal
-      ? targetPosition.x >= sourcePosition.x ? Position.Right : Position.Left
-      : targetPosition.y >= sourcePosition.y ? Position.Bottom : Position.Top
+      ? targetPosition.x >= sourcePosition.x
+        ? Position.Right
+        : Position.Left
+      : targetPosition.y >= sourcePosition.y
+        ? Position.Bottom
+        : Position.Top
     const targetSide = horizontal
-      ? targetPosition.x >= sourcePosition.x ? Position.Left : Position.Right
-      : targetPosition.y >= sourcePosition.y ? Position.Top : Position.Bottom
+      ? targetPosition.x >= sourcePosition.x
+        ? Position.Left
+        : Position.Right
+      : targetPosition.y >= sourcePosition.y
+        ? Position.Top
+        : Position.Bottom
 
     edges.push({
       id: key,
@@ -466,16 +484,18 @@ function physicalElements(
 ) {
   if (!runtime) return { nodes: [], edges: [] }
 
-  const rawHosts = runtime.hosts && runtime.hosts.length > 1
-    ? runtime.hosts
-    : null
+  const rawHosts =
+    runtime.hosts && runtime.hosts.length > 1 ? runtime.hosts : null
 
   if (rawHosts) {
     const nodes: Node[] = rawHosts.map((host, idx) => {
       const hostComps = components.filter((c) => {
-        if (host.id === 'upf-vm') return c.node_id === 'upf-vm' || c.id === 'upf'
-        if (host.id === 'upf-vm2') return c.node_id === 'upf-vm2' || c.id === 'upf2'
-        if (host.id === 'gnb-vm') return c.node_id === 'gnb-vm' || c.id === 'gnb'
+        if (host.id === 'upf-vm')
+          return c.node_id === 'upf-vm' || c.id === 'upf'
+        if (host.id === 'upf-vm2')
+          return c.node_id === 'upf-vm2' || c.id === 'upf2'
+        if (host.id === 'gnb-vm')
+          return c.node_id === 'gnb-vm' || c.id === 'gnb'
         if (host.id === 'ue-vm') return c.node_id === 'ue-vm' || c.id === 'ue'
         return (
           c.node_id === 'core' ||
@@ -618,7 +638,8 @@ function physicalElements(
       const coreHost = rawHosts[0]
       for (let i = 1; i < rawHosts.length; i++) {
         const targetHost = rawHosts[i]
-        const isUpf2 = targetHost.id === 'upf-vm2' || targetHost.ip === '10.210.50.9'
+        const isUpf2 =
+          targetHost.id === 'upf-vm2' || targetHost.ip === '10.210.50.9'
         const color = isUpf2 ? '#06b6d4' : 'var(--primary)'
         edges.push({
           id: `host-link-${targetHost.id}`,
@@ -634,9 +655,7 @@ function physicalElements(
             height: 14,
             color,
           },
-          label: isUpf2
-            ? 'N4 (Corporate)'
-            : 'N4 (Internet)',
+          label: isUpf2 ? 'N4 (Corporate)' : 'N4 (Internet)',
           labelStyle: {
             fontSize: 10,
             fontWeight: 700,
@@ -661,7 +680,9 @@ function physicalElements(
     return { nodes, edges }
   }
 
-  const active = components.filter((component) => component.status === 'running').length
+  const active = components.filter(
+    (component) => component.status === 'running'
+  ).length
   const address = runtime.interfaces
     .flatMap((item) => item.addresses)
     .find((item) => item.family === 'inet' && !item.address.startsWith('127.'))
@@ -742,7 +763,7 @@ export function EmsTopology({
       <Background color='var(--border)' gap={20} size={1} />
       <Controls
         showInteractive={false}
-        className='!bg-card !border-border !border !shadow-md !rounded-lg overflow-hidden [&>button]:!bg-card [&>button]:!border-border [&>button]:!fill-foreground [&>button:hover]:!bg-muted'
+        className='overflow-hidden !rounded-lg !border !border-border !bg-card !shadow-md [&>button]:!border-border [&>button]:!bg-card [&>button]:!fill-foreground [&>button:hover]:!bg-muted'
       />
     </ReactFlow>
   )

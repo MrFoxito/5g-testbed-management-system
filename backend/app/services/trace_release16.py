@@ -467,6 +467,24 @@ def build_release16_analysis(task: dict, output: str, *, tshark_version: str | N
 
     target_matched = any(e["_target_match"] for e in events)
     excluded = 0
+    troubleshooting_events = []
+    troubleshooting_participants = []
+    if target_hash and not target_matched and events:
+        tb_raw = sorted(events, key=lambda e: (e["_epoch"], e["ordinal"]))[:500]
+        tb_start = tb_raw[0]["_epoch"] if tb_raw else 0
+        for n, ev in enumerate(tb_raw, 1):
+            tb_ev = dict(ev)
+            tb_ev["ordinal"] = n
+            tb_ev["relative_ms"] = round((tb_ev.get("_epoch", 0) - tb_start) * 1000, 3)
+            tb_ev["troubleshooting"] = True
+            tb_ev.pop("_keys", None)
+            tb_ev.pop("_target_match", None)
+            tb_ev.pop("_epoch", None)
+            troubleshooting_events.append(tb_ev)
+        troubleshooting_participants = list(dict.fromkeys(
+            n for e in troubleshooting_events for n in (e["source_nf"], e["target_nf"]) if n and n != "unknown"
+        ))
+
     if target_hash:
         keys = set().union(*(e["_keys"] for e in events if e["_target_match"]))
         selected = {e["id"] for e in events if e["_target_match"]}
@@ -553,12 +571,20 @@ def build_release16_analysis(task: dict, output: str, *, tshark_version: str | N
         "recommendation": "Consulte las referencias y el PCAP; un paso no observado no equivale a incumplimiento.",
     }]
     if target_hash:
-        diagnostics.append({
-            "severity": "warning",
-            "title": "Correlación conservadora",
-            "detail": f"{excluded} paquetes sin vínculo verificable con el selector excluidos. SUCI no se transforma en SUPI por suposición.",
-            "recommendation": "Para tráfico SBI/N4 no correlacionable utilice Interface Trace; no atribuya tráfico global al suscriptor.",
-        })
+        if not target_matched and troubleshooting_events:
+            diagnostics.append({
+                "severity": "warning",
+                "title": "Modo Diagnóstico (Troubleshooting Activo)",
+                "detail": f"No se observaron eventos de señalización NAS/RRC vinculados al suscriptor ({excluded} paquetes de interfaz observados). Se presenta la traza de red e interfaces capturadas para diagnóstico y análisis de fallos.",
+                "recommendation": "Verifique los eventos entre NFs (e.g. gNB, AMF, SMF, UPF) en la secuencia para determinar si hubo fallos de conectividad N2/N3/N4 o falta de actividad del UE.",
+            })
+        else:
+            diagnostics.append({
+                "severity": "warning",
+                "title": "Correlación conservadora",
+                "detail": f"{excluded} paquetes sin vínculo verificable con el selector excluidos. SUCI no se transforma en SUPI por suposición.",
+                "recommendation": "Para tráfico SBI/N4 no correlacionable utilice Interface Trace; no atribuya tráfico global al suscriptor.",
+            })
 
     return {
         "task_id": task["id"],
@@ -587,6 +613,9 @@ def build_release16_analysis(task: dict, output: str, *, tshark_version: str | N
         "procedures": procedures,
         "participants": list(dict.fromkeys(n for e in events for n in (e["source_nf"], e["target_nf"]))),
         "events": events,
+        "troubleshooting_active": bool(target_hash and not target_matched and troubleshooting_events),
+        "troubleshooting_events": troubleshooting_events,
+        "troubleshooting_participants": troubleshooting_participants,
         "diagnostics": diagnostics,
         "stats": {
             "decoded_rows": len(rows),

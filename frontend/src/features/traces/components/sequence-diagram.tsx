@@ -2,8 +2,6 @@ import { useMemo, useRef, useState } from 'react'
 import {
   ArrowDown,
   ArrowUp,
-  Filter,
-  Layers,
   RotateCcw,
   Search,
   ZoomIn,
@@ -43,7 +41,6 @@ const CANONICAL_ORDER = [
   'sgwu',
   'dn',
 ]
-type FilterMode = 'telco' | 'all'
 type Density = 'normal' | 'compact'
 
 export function SequenceDiagram({
@@ -57,7 +54,6 @@ export function SequenceDiagram({
   selectedEventId?: string
   onSelectEvent?: (event: TraceEvent) => void
 }) {
-  const [filterMode, setFilterMode] = useState<FilterMode>('telco')
   const [searchTerm, setSearchTerm] = useState('')
   const [density, setDensity] = useState<Density>('normal')
   const [procedureFilter, setProcedureFilter] = useState('all')
@@ -69,8 +65,6 @@ export function SequenceDiagram({
   )
   const filteredEvents = useMemo(() => {
     let result = [...events].sort((a, b) => (a.ordinal ?? 0) - (b.ordinal ?? 0))
-    if (filterMode === 'telco')
-      result = result.filter((event) => !isNoise(event))
     if (procedureFilter !== 'all')
       result = result.filter((event) =>
         matchesProcedure(event, procedureFilter)
@@ -90,18 +84,39 @@ export function SequenceDiagram({
       )
     }
     return result.slice(0, 500)
-  }, [events, filterMode, procedureFilter, searchTerm])
+  }, [events, procedureFilter, searchTerm])
+  const protocolLegend = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filteredEvents
+            .map((event) => event.protocol)
+            .filter((protocol): protocol is string => Boolean(protocol))
+        )
+      ),
+    [filteredEvents]
+  )
 
-  if (!events.length || participantList.length < 2) {
+  if (!events.length) {
     return (
       <EmptyState
-        title='Secuencia aún no disponible'
-        description='Se requieren eventos normalizados con funciones de origen y destino para construir el diagrama.'
+        title='Captura sin paquetes de señalización'
+        description='No se registraron paquetes decodificables en el periodo seleccionado o la interfaz estuvo inactiva.'
       />
     )
   }
 
-  const rowHeight = density === 'normal' ? 44 : 34
+  if (participantList.length < 2) {
+    return (
+      <EmptyState
+        title='Señalización unilateral o insuficiente'
+        description='Se detectaron eventos, pero no fue posible identificar al menos dos funciones de red para diagramar la interacción.'
+      />
+    )
+  }
+
+  const baseRowHeight = density === 'normal' ? 44 : 34
+  const rowHeight = Math.max(28, Math.round(baseRowHeight * zoomLevel))
   const diagramWidth = Math.max(
     participantList.length * PARTICIPANT_WIDTH * zoomLevel,
     780
@@ -116,31 +131,10 @@ export function SequenceDiagram({
   }
 
   return (
-    <div className='space-y-3'>
+    <div className='flex min-h-0 flex-col gap-2'>
       <div className='flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card/60 p-2.5 text-xs'>
         <div className='flex flex-wrap items-center gap-2'>
-          <div className='flex items-center rounded-md border bg-muted/30 p-0.5'>
-            <Button
-              variant={filterMode === 'telco' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 gap-1 px-2.5 text-xs font-semibold'
-              onClick={() => {
-                setFilterMode('telco')
-                setProcedureFilter('all')
-              }}
-            >
-              <Filter className='h-3 w-3 text-sky-500' /> Señalización 3GPP
-            </Button>
-            <Button
-              variant={filterMode === 'all' ? 'secondary' : 'ghost'}
-              size='sm'
-              className='h-7 gap-1 px-2.5 text-xs font-semibold'
-              onClick={() => setFilterMode('all')}
-            >
-              <Layers className='h-3 w-3' /> Todos ({events.length})
-            </Button>
-          </div>
-          <div className='hidden items-center gap-1 border-l pl-2 xl:flex'>
+          <div className='hidden items-center gap-1 xl:flex'>
             {(
               [
                 ['all', 'Todo'],
@@ -247,10 +241,10 @@ export function SequenceDiagram({
         </div>
       </div>
 
-      <div className='overflow-hidden rounded-xl border bg-card shadow-inner'>
+      <div className='min-h-0 overflow-hidden rounded-lg border bg-card shadow-inner'>
         <div
           ref={scrollRef}
-          className='relative h-[620px] max-h-[calc(100vh-230px)] min-h-[420px] overflow-auto'
+          className='relative h-[calc(100dvh-10.75rem)] min-h-[22rem] overflow-auto'
           style={{ scrollbarWidth: 'thin' }}
         >
           <div
@@ -498,17 +492,15 @@ export function SequenceDiagram({
         <span className='font-semibold tracking-wide uppercase'>
           Protocolos
         </span>
-        {['NAS', 'NGAP', 'HTTP2', 'PFCP', 'GTP-U', 'ICMP', 'NR-Uu'].map(
-          (protocol) => (
-            <span key={protocol} className='flex items-center gap-1.5'>
-              <span
-                className='h-0.5 w-5 rounded-full'
-                style={{ backgroundColor: protocolColor(protocol) }}
-              />
-              {protocol}
-            </span>
-          )
-        )}
+        {protocolLegend.map((protocol) => (
+          <span key={protocol} className='flex items-center gap-1.5'>
+            <span
+              className='h-0.5 w-5 rounded-full'
+              style={{ backgroundColor: protocolColor(protocol) }}
+            />
+            {protocol}
+          </span>
+        ))}
         <span className='ml-auto'>
           Línea discontinua = evento correlacionado
         </span>
@@ -517,48 +509,13 @@ export function SequenceDiagram({
   )
 }
 
-function isNoise(event: TraceEvent) {
-  // Keep R16 protocol evidence, including NRF management and HTTP responses.
-  if (event.interpretation_policy) return event.interface_3gpp === 'Transport'
-  const message = (event.message || '').toLowerCase()
-  const protocol = (event.protocol || '').toLowerCase()
-  if (
-    [
-      'heartbeat',
-      'nnrf_nfmanagement',
-      '204 no content',
-      'window_update',
-      'settings',
-      'magic',
-      'data[',
-      'headers[',
-    ].some((term) => message.includes(term))
-  )
-    return true
-  const semantic = [
-    'ngap',
-    'nas',
-    'pfcp',
-    'gtp',
-    'icmp',
-    'http',
-    'sbi',
-    'registration',
-    'authentication',
-    'security',
-    'session',
-    'release',
-    'pdu',
-  ].some((term) => protocol.includes(term) || message.includes(term))
-  return !semantic && protocol === 'tcp'
-}
-
 function matchesProcedure(event: TraceEvent, procedure: string) {
   if (event.interpretation_policy) {
     if (procedure === 'registration') {
       return (
         event.procedure === 'registration' ||
-        event.procedure === 'authentication'
+        event.procedure === 'authentication' ||
+        event.procedure === 'nas-security'
       )
     }
     return event.procedure === procedure
@@ -652,6 +609,9 @@ function buildParticipants(
     )
   }
   labels.delete('unknown')
+  if (events.length > 0 && labels.size === 1) {
+    labels.set('network', 'Red')
+  }
   return [...labels.entries()]
     .map(([id, label]) => ({ id, label }))
     .sort(
@@ -691,19 +651,37 @@ function participantRank(id: string) {
 function formatPillMessage(value: string, max: number, literal = false) {
   if (literal) return truncate(value, max)
   const text = value
-    .replace(/N2 Initial UE Message \(Registration Request\)/gi, 'N2 Initial UE (Reg Req)')
-    .replace(/N2 Initial Context Setup Request \(Registration Accept\)/gi, 'N2 Init Context (Reg Accept)')
+    .replace(
+      /N2 Initial UE Message \(Registration Request\)/gi,
+      'N2 Initial UE (Reg Req)'
+    )
+    .replace(
+      /N2 Initial Context Setup Request \(Registration Accept\)/gi,
+      'N2 Init Context (Reg Accept)'
+    )
     .replace(/N2 Initial Context Setup Response/gi, 'N2 Init Context Resp')
-    .replace(/NAS Registration Complete \+ PDU Session Establishment Request \(PSI: 1 & 2\)/gi, 'NAS Reg OK + PDU Req [PSI 1,2]')
+    .replace(
+      /NAS Registration Complete \+ PDU Session Establishment Request \(PSI: 1 & 2\)/gi,
+      'NAS Reg OK + PDU Req [PSI 1,2]'
+    )
     .replace(/NAS Registration Complete/gi, 'NAS Reg Complete')
     .replace(/NAS Configuration Update Command/gi, 'NAS Config Update Cmd')
-    .replace(/NAS Authentication Request \(RAND, AUTN, ngKSI\)/gi, 'NAS Auth Req (RAND, AUTN)')
+    .replace(
+      /NAS Authentication Request \(RAND, AUTN, ngKSI\)/gi,
+      'NAS Auth Req (RAND, AUTN)'
+    )
     .replace(/NAS Authentication Response \(RES\*\)/gi, 'NAS Auth Resp (RES*)')
     .replace(/NAS Security Mode Command/gi, 'NAS Security Mode Cmd')
     .replace(/NAS Security Mode Complete/gi, 'NAS Security Mode OK')
     .replace(/Nausf_UEAuthentication_Authenticate Request/gi, 'Nausf_Auth Req')
-    .replace(/Nausf_UEAuthentication_Authenticate Response/gi, 'Nausf_Auth Resp')
-    .replace(/Nudm_UEAuthentication_ResultConfirmation \(auth-events\) Request/gi, 'Nudm_Auth ResultConfirm')
+    .replace(
+      /Nausf_UEAuthentication_Authenticate Response/gi,
+      'Nausf_Auth Resp'
+    )
+    .replace(
+      /Nudm_UEAuthentication_ResultConfirmation \(auth-events\) Request/gi,
+      'Nudm_Auth ResultConfirm'
+    )
     .replace(/Nudm_UEAuthentication Response/gi, 'Nudm_Auth Resp')
     .replace(/Nudr_DM_Query Request/gi, 'Nudr_DM Query Req')
     .replace(/Nudr_DM_Query Response/gi, 'Nudr_DM Query Resp')
@@ -714,16 +692,37 @@ function formatPillMessage(value: string, max: number, literal = false) {
     .replace(/Nudm_SDM_Get Response/gi, 'Nudm_SDM Get Resp')
     .replace(/Nudm_SDM_Subscribe Request/gi, 'Nudm_SDM Sub Req')
     .replace(/Nudm_SDM_Subscribe Response/gi, 'Nudm_SDM Sub Resp')
-    .replace(/Npcf_AMPolicyControl_Create Request/gi, 'Npcf_AMPolicy Create Req')
-    .replace(/Npcf_AMPolicyControl_Create Response/gi, 'Npcf_AMPolicy Create Resp')
-    .replace(/Npcf_SMPolicyControl_Create Request/gi, 'Npcf_SMPolicy Create Req')
-    .replace(/Npcf_SMPolicyControl_Create Response/gi, 'Npcf_SMPolicy Create Resp')
+    .replace(
+      /Npcf_AMPolicyControl_Create Request/gi,
+      'Npcf_AMPolicy Create Req'
+    )
+    .replace(
+      /Npcf_AMPolicyControl_Create Response/gi,
+      'Npcf_AMPolicy Create Resp'
+    )
+    .replace(
+      /Npcf_SMPolicyControl_Create Request/gi,
+      'Npcf_SMPolicy Create Req'
+    )
+    .replace(
+      /Npcf_SMPolicyControl_Create Response/gi,
+      'Npcf_SMPolicy Create Resp'
+    )
     .replace(/Nbsf_Management_Register Request/gi, 'Nbsf_Reg Req')
     .replace(/Nbsf_Management_Register Response/gi, 'Nbsf_Reg Resp')
-    .replace(/Nsmf_PDUSession_CreateSMContext Request/gi, 'Nsmf_CreateSMContext Req')
-    .replace(/Nsmf_PDUSession_CreateSMContext Response/gi, 'Nsmf_CreateSMContext Resp')
+    .replace(
+      /Nsmf_PDUSession_CreateSMContext Request/gi,
+      'Nsmf_CreateSMContext Req'
+    )
+    .replace(
+      /Nsmf_PDUSession_CreateSMContext Response/gi,
+      'Nsmf_CreateSMContext Resp'
+    )
     .replace(/Namf_Communication_N1N2MessageTransfer/gi, 'Namf_N1N2Transfer')
-    .replace(/N2 PDU Session Resource Setup Request \(PDU Session Establishment Accept\)/gi, 'N2 PDU Setup Req (Accept)')
+    .replace(
+      /N2 PDU Session Resource Setup Request \(PDU Session Establishment Accept\)/gi,
+      'N2 PDU Setup Req (Accept)'
+    )
     .replace(/N2 PDU Session Resource Setup Response/gi, 'N2 PDU Setup Resp')
     .replace(/N4 Session Establishment Request/gi, 'N4 Estab Req')
     .replace(/N4 Session Establishment Response/gi, 'N4 Estab Resp')

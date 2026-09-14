@@ -30,6 +30,7 @@ import {
   type TopologySelection,
   type TopologyView,
 } from './ems-topology'
+import { alarmBelongsToComponent } from './topology-alarm'
 
 export function TopologyPage() {
   const scenario = useScenarioStore((state) => state.scenario)
@@ -155,7 +156,10 @@ export function TopologyPage() {
                 const isUpf = component.id === 'upf' || component.id === 'upf2'
                 const upfInstances = isUpf
                   ? (status.data?.components ?? []).filter(
-                      (c) => c.id === 'upf' || c.id === 'upf2' || c.kind === 'user-plane'
+                      (c) =>
+                        c.id === 'upf' ||
+                        c.id === 'upf2' ||
+                        c.kind === 'user-plane'
                     )
                   : []
                 const isMultiUpf = upfInstances.length > 1
@@ -173,26 +177,30 @@ export function TopologyPage() {
                               a.node_id === 'upf-vm2'))
                       )
                     }
-                    return (
-                      a.component === component.id ||
-                      a.component?.toLowerCase() === component.id.toLowerCase() ||
-                      (a.node_id && a.node_id === component.node_id)
-                    )
+                    return alarmBelongsToComponent(a, component)
                   }
                 )
 
-                const allUpfRunning = isMultiUpf && upfInstances.every((c) => c.status === 'running')
+                const allUpfRunning =
+                  isMultiUpf &&
+                  upfInstances.every((c) => c.status === 'running')
 
                 return (
                   <>
                     <SheetHeader>
                       <div className='flex items-center gap-2'>
                         <SheetTitle>
-                          {isMultiUpf ? 'UPF (Plano de Usuario)' : component.label}
+                          {isMultiUpf
+                            ? 'UPF (Plano de Usuario)'
+                            : component.label}
                         </SheetTitle>
                         <Badge
                           variant={
-                            (isMultiUpf ? allUpfRunning : component.status === 'running')
+                            (
+                              isMultiUpf
+                                ? allUpfRunning
+                                : component.status === 'running'
+                            )
                               ? 'default'
                               : 'destructive'
                           }
@@ -229,21 +237,23 @@ export function TopologyPage() {
                             ? 'Slice Corporativo (MEC)'
                             : 'Slice Internet (eMBB)'
                           const dnn = isCorp ? 'corporate' : 'internet'
-                          const subnet = isCorp ? '10.46.0.0/16' : '10.45.0.0/16'
+                          const subnet = isCorp
+                            ? '10.46.0.0/16'
+                            : '10.45.0.0/16'
 
                           return (
                             <div
                               key={inst.id}
-                              className='rounded-lg border p-3 bg-card/70 space-y-1.5 shadow-sm'
+                              className='space-y-1.5 rounded-lg border bg-card/70 p-3 shadow-sm'
                             >
                               <div className='flex items-center justify-between'>
                                 <div className='flex items-center gap-2'>
-                                  <span className='font-bold font-mono text-xs text-foreground'>
+                                  <span className='font-mono text-xs font-bold text-foreground'>
                                     {inst.label}
                                   </span>
                                   <Badge
                                     variant='outline'
-                                    className='text-[9px] font-mono'
+                                    className='font-mono text-[9px]'
                                   >
                                     {sliceName}
                                   </Badge>
@@ -259,27 +269,27 @@ export function TopologyPage() {
                                   {inst.status}
                                 </Badge>
                               </div>
-                              <div className='grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px] font-mono pt-1 text-muted-foreground'>
+                              <div className='grid grid-cols-2 gap-x-2 gap-y-0.5 pt-1 font-mono text-[11px] text-muted-foreground'>
                                 <div>
-                                  <span className='text-foreground font-semibold'>
+                                  <span className='font-semibold text-foreground'>
                                     IP N4/N3:
                                   </span>{' '}
                                   {ip}
                                 </div>
                                 <div>
-                                  <span className='text-foreground font-semibold'>
+                                  <span className='font-semibold text-foreground'>
                                     DNN:
                                   </span>{' '}
                                   {dnn}
                                 </div>
                                 <div>
-                                  <span className='text-foreground font-semibold'>
+                                  <span className='font-semibold text-foreground'>
                                     Subred:
                                   </span>{' '}
                                   {subnet}
                                 </div>
                                 <div>
-                                  <span className='text-foreground font-semibold'>
+                                  <span className='font-semibold text-foreground'>
                                     Host VM:
                                   </span>{' '}
                                   {inst.node_id}
@@ -297,7 +307,8 @@ export function TopologyPage() {
                           <div className='flex items-center gap-1.5 font-semibold text-destructive'>
                             <AlertTriangle className='size-3.5' />
                             <span>
-                              Incidentes Telco Activos ({componentAlarms.length})
+                              Incidentes Telco Activos ({componentAlarms.length}
+                              )
                             </span>
                           </div>
                           <Link
@@ -520,14 +531,19 @@ function HostDetail({
 }) {
   const host = runtime?.hosts?.find((h) => h.id === selectedHostId)
   const title = host?.hostname ?? runtime?.hostname ?? 'Host del testbed'
-  const role = host?.role ?? `Vista física obtenida por ${runtime?.source ?? 'fuente desconocida'}`
+  const role =
+    host?.role ??
+    `Vista física obtenida por ${runtime?.source ?? 'fuente desconocida'}`
   const ifaces = host?.interfaces ?? runtime?.interfaces ?? []
   const ports = host?.listening_ports ?? runtime?.listening_ports ?? []
   const hostComps = host
     ? components.filter((c) => {
-        if (host.id === 'upf-vm') return c.node_id === 'upf-vm' || c.id === 'upf'
-        if (host.id === 'upf-vm2') return c.node_id === 'upf-vm2' || c.id === 'upf2'
-        if (host.id === 'gnb-vm') return c.node_id === 'gnb-vm' || c.id === 'gnb'
+        if (host.id === 'upf-vm')
+          return c.node_id === 'upf-vm' || c.id === 'upf'
+        if (host.id === 'upf-vm2')
+          return c.node_id === 'upf-vm2' || c.id === 'upf2'
+        if (host.id === 'gnb-vm')
+          return c.node_id === 'gnb-vm' || c.id === 'gnb'
         if (host.id === 'ue-vm') return c.node_id === 'ue-vm' || c.id === 'ue'
         return (
           c.node_id === 'core' ||
@@ -543,7 +559,10 @@ function HostDetail({
         <div className='flex items-center justify-between gap-2'>
           <SheetTitle className='font-mono font-bold'>{title}</SheetTitle>
           {host?.ip && (
-            <Badge variant='outline' className='font-mono text-xs font-semibold'>
+            <Badge
+              variant='outline'
+              className='font-mono text-xs font-semibold'
+            >
               {host.ip}
             </Badge>
           )}
@@ -554,14 +573,14 @@ function HostDetail({
         <h3 className='mb-2 text-sm font-semibold'>Interfaces de Red</h3>
         <div className='space-y-2'>
           {ifaces.map((item) => (
-            <div key={item.name} className='rounded-md border p-3 bg-card/60'>
-              <div className='flex justify-between items-center'>
+            <div key={item.name} className='rounded-md border bg-card/60 p-3'>
+              <div className='flex items-center justify-between'>
                 <b className='font-mono text-sm'>{item.name}</b>
                 <Badge variant={item.state === 'up' ? 'default' : 'secondary'}>
                   {item.state}
                 </Badge>
               </div>
-              <p className='mt-1 text-xs text-muted-foreground font-mono'>
+              <p className='mt-1 font-mono text-xs text-muted-foreground'>
                 {item.addresses
                   .map(
                     (address) => `${address.address}/${address.prefix_length}`
