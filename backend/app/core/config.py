@@ -12,6 +12,13 @@ class Settings(BaseSettings):
     secret_key: str = "change-this-development-key"
     access_token_minutes: int = 480
     execution_mode: Literal["simulated", "local", "remote"] = "simulated"
+    deployment_stage: Literal["full", "connectivity"] = "full"
+    deployed_scenarios: list[str] = ["4g-epc"]
+    vm_inventory_path: Path = Path(__file__).resolve().parents[1] / "catalog" / "lab_vms.json"
+    vm_ssh_host: str = "127.0.0.1"
+    vm_ssh_user: str = "emsadmin"
+    vm_ssh_key_path: Path = Path.home() / "VirtualBox VMs/MAEstro-4G/id_rsa"
+    vm_known_hosts_path: Path = Path.home() / "VirtualBox VMs/MAEstro-4G/known_hosts"
     catalog_path: Path = Path(__file__).resolve().parents[1] / "catalog" / "scenarios.json"
     profiles_path: Path = Path(__file__).resolve().parents[1] / "catalog" / "component_profiles.json"
     mock_state_path: Path = Path(__file__).resolve().parents[1] / "catalog" / "mock_states.json"

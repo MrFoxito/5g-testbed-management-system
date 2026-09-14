@@ -261,6 +261,9 @@ async def delete_trace(trace_id: str, user: UserPublic = Depends(current_user)):
 
 @router.websocket("/ws/live/{scenario_id}")
 async def live(websocket: WebSocket, scenario_id: str, token: str):
+    if get_settings().deployment_stage == "connectivity":
+        await websocket.close(code=4409)
+        return
     if scenario_id not in CATALOG:
         await websocket.close(code=4404)
         return

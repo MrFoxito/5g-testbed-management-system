@@ -1,0 +1,9 @@
+{
+  "4g-epc": [
+    {"id": "epc-cp", "name": "EMS-EPC-CP", "role": "Plano de control EPC", "address": "10.210.40.1", "ssh_port": 2230},
+    {"id": "sgwu-vm", "name": "EMS-SGW-U", "role": "Plano de usuario SGW", "address": "10.210.40.2", "ssh_port": 2231},
+    {"id": "pgwu-vm", "name": "EMS-PGW-U", "role": "Plano de usuario PGW", "address": "10.210.40.3", "ssh_port": 2232},
+    {"id": "enb-vm", "name": "EMS-ENB", "role": "eNodeB LTE", "address": "10.210.40.10", "ssh_port": 2233},
+    {"id": "ue-vm", "name": "EMS-UE-4G", "role": "Terminal LTE", "address": "10.210.40.11", "ssh_port": 2234}
+  ]
+}

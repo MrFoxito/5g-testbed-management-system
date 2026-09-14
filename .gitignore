@@ -19,6 +19,15 @@ __pycache__/
 *.pyc
 *.pyo
 
+# VirtualBox media must remain outside this repository.
+*.iso
+*.vdi
+*.vmdk
+*.vbox
+*.vbox-prev
+*.sav
+*.ova
+
 # Captures & Logs
 *.pcap
 *.log

@@ -5,6 +5,7 @@ from app.api.v1.endpoints import (
     audit,
     auth,
     configuration,
+    deployment,
     experiments,
     observability,
     operations,
@@ -14,6 +15,7 @@ from app.api.v1.endpoints import (
 )
 
 router = APIRouter()
+router.include_router(deployment.router)
 router.include_router(alarm_center.router)
 router.include_router(auth.router)
 router.include_router(scenarios.router)

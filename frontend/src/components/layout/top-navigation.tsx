@@ -14,7 +14,11 @@ import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { sidebarData } from './data/sidebar-data'
 
-export function TopNavigation() {
+export function TopNavigation({
+  connectivityOnly = false,
+}: {
+  connectivityOnly?: boolean
+}) {
   const scenario = useScenarioStore((state) => state.scenario)
   const setScenario = useScenarioStore((state) => state.setScenario)
   const busy = useIsMutating() > 0
@@ -26,9 +30,10 @@ export function TopNavigation() {
     .flatMap((group) => group.items)
     .flatMap((item) => item.items ?? [item])
     .filter((item) => user?.role !== 'student' || item.url !== '/audit')
+    .filter((item) => !connectivityOnly || item.url === '/')
 
   return (
-    <header className='sticky top-0 z-40 flex flex-wrap items-center gap-x-4 border-b px-3 md:px-4 xl:flex-nowrap bg-[#1B2A4A] border-white/10 dark:bg-background dark:border-border'>
+    <header className='sticky top-0 z-40 flex flex-wrap items-center gap-x-4 border-b border-white/10 bg-[#1B2A4A] px-3 md:px-4 xl:flex-nowrap dark:border-border dark:bg-background'>
       <Link
         to='/'
         aria-label='MAEstro · Inicio'
@@ -44,7 +49,7 @@ export function TopNavigation() {
           alt=''
           className='hidden size-8 dark:block'
         />
-        <span className='hidden text-base font-bold tracking-tight sm:inline text-white dark:text-foreground'>
+        <span className='hidden text-base font-bold tracking-tight text-white sm:inline dark:text-foreground'>
           <span>MAE</span>
           <span className='font-semibold'>stro</span>
         </span>
@@ -54,29 +59,29 @@ export function TopNavigation() {
         className='order-3 -mx-1 flex w-full min-w-0 items-center overflow-x-auto px-1 pb-2 xl:order-none xl:mx-0 xl:h-14 xl:flex-1 xl:pb-0'
       >
         <div className='flex shrink-0 items-center gap-0.5 xl:mx-auto'>
-        {links.map((item) => {
-          const active =
-            item.url === '/'
-              ? pathname === '/'
-              : pathname === item.url || pathname.startsWith(`${item.url}/`)
-          return (
-            <Link
-              key={item.url}
-              to={item.url}
-              aria-current={active ? 'page' : undefined}
-              className={cn(
-                'shrink-0 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none',
-                // Light mode (PUCP blue bg)
-                active
-                  ? 'bg-white/15 text-white dark:bg-accent dark:text-accent-foreground'
-                  : 'text-white/70 hover:bg-white/10 hover:text-white dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground',
-                'focus-visible:ring-white/40 dark:focus-visible:ring-ring'
-              )}
-            >
-              {item.title}
-            </Link>
-          )
-        })}
+          {links.map((item) => {
+            const active =
+              item.url === '/'
+                ? pathname === '/'
+                : pathname === item.url || pathname.startsWith(`${item.url}/`)
+            return (
+              <Link
+                key={item.url}
+                to={item.url}
+                aria-current={active ? 'page' : undefined}
+                className={cn(
+                  'shrink-0 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none',
+                  // Light mode (PUCP blue bg)
+                  active
+                    ? 'bg-white/15 text-white dark:bg-accent dark:text-accent-foreground'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white dark:text-muted-foreground dark:hover:bg-muted dark:hover:text-foreground',
+                  'focus-visible:ring-white/40 dark:focus-visible:ring-ring'
+                )}
+              >
+                {connectivityOnly ? 'Conectividad' : item.title}
+              </Link>
+            )
+          })}
         </div>
       </nav>
       <div className='ml-auto flex h-14 shrink-0 items-center gap-2'>

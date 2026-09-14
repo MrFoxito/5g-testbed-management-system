@@ -4,6 +4,10 @@ Prototipo de plataforma web para gestionar, observar y analizar testbeds Open5GS
 
 ## Inicio rápido sin Open5GS
 
+Para el laboratorio local **4G con VMs reales y verificación SSH**, seguir
+[infra/4g/README.md](infra/4g/README.md). Su perfil Docker muestra únicamente
+conectividad 4G y deja 5G sin datos; EPC y srsRAN se instalarán en una etapa posterior.
+
 Se requiere Docker con Compose:
 
 ```bash

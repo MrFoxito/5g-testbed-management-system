@@ -1,0 +1,22 @@
+# Explicit 4G connectivity profile. Does not load docker-compose.override.yml.
+# docker compose -f docker-compose.yml -f docker-compose.4g.yml up -d --build
+services:
+  backend:
+    environment:
+      EMS_DEPLOYMENT_STAGE: connectivity
+      EMS_DEPLOYED_SCENARIOS: '["4g-epc"]'
+      EMS_ENABLE_REAL_CAPTURES: "false"
+      EMS_ENABLE_MONGO: "false"
+      EMS_VM_SSH_HOST: host.docker.internal
+      EMS_VM_SSH_USER: emsadmin
+      EMS_VM_SSH_KEY_PATH: /run/maestro-4g/id_rsa
+      EMS_VM_KNOWN_HOSTS_PATH: /run/maestro-4g/known_hosts
+    volumes:
+      - type: bind
+        source: ${USERPROFILE}/VirtualBox VMs/MAEstro-4G/id_rsa
+        target: /run/maestro-4g/id_rsa
+        read_only: true
+      - type: bind
+        source: ${USERPROFILE}/VirtualBox VMs/MAEstro-4G/known_hosts
+        target: /run/maestro-4g/known_hosts
+        read_only: true

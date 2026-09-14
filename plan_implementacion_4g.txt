@@ -1,0 +1,329 @@
+# Plan de Implementación — Testbed 4G EPC/LTE Distribuido en VMs
+
+## Contexto y Objetivo
+
+Tu tesis cubre la parte **4G LTE / EPC** del sistema EMS "MAEstro", trabajando de forma **totalmente independiente** de Miguel (5G SA). El objetivo es desplegar un testbed 4G educativo con separación de plano de control y plano de usuario (arquitectura CUPS — Control and User Plane Separation), análogo a lo que Miguel hizo para 5G, donde cada función crítica del EPC reside en su propia VM.
+
+### Lo que ya existe en el repositorio
+
+Miguel ya dejó preparado en el catálogo del EMS ([scenarios.json](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/catalog/scenarios.json)) un escenario `4g-epc` con 3 nodos lógicos (`epc`, `enb-vm`, `ue-vm`) y 10 componentes. Los perfiles 4G están definidos en [component_profiles.json](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/catalog/component_profiles.json). Sin embargo, **todo está apuntando a una sola VM** (`epc`), sin separación de plano de usuario ni VMs dedicadas para RAN/UE.
+
+Tu trabajo será:
+1. Desplegar las VMs 4G separando el plano de usuario del plano de control.
+2. Actualizar el catálogo EMS para reflejar la nueva topología distribuida.
+3. Crear los scripts de provisión automática (como hizo Miguel en `infra/`).
+4. Adaptar el backend para que el `RemoteExecutionAdapter` sepa rutear SSH a las VMs 4G.
+
+---
+
+## Propuesta de Arquitectura: 5 VMs para 4G EPC
+
+Siguiendo la misma filosofía de Miguel (separar plano de control, plano de usuario y RAN/UE en VMs independientes), y respetando el direccionamiento `10.210.40.0/24` sugerido en su documento:
+
+| # | VM Name | Node ID | Servicios 4G Alojados | IP Interna | Puerto SSH | vCPU | RAM | Disco |
+|---|---------|---------|----------------------|------------|------------|------|-----|-------|
+| 1 | `EMS-EPC-CP` | `epc-cp` | MME, HSS, PCRF, SGW-C, PGW-C (SMF) + MongoDB | `10.210.40.1` | `2230` | 4 | 4 GiB | 30 GB |
+| 2 | `EMS-SGW-U` | `sgwu-vm` | SGW-U (Serving Gateway User Plane) | `10.210.40.2` | `2231` | 2 | 2 GiB | 20 GB |
+| 3 | `EMS-PGW-U` | `pgwu-vm` | PGW-U/UPF (PDN Gateway User Plane, salida SGi) | `10.210.40.3` | `2232` | 2 | 2 GiB | 20 GB |
+| 4 | `EMS-ENB` | `enb-vm` | eNodeB (srsRAN — `srsenb`) | `10.210.40.10` | `2233` | 2 | 2 GiB | 20 GB |
+| 5 | `EMS-UE-4G` | `ue-vm` | UE LTE (srsRAN — `srsue`) | `10.210.40.11` | `2234` | 2 | 2 GiB | 20 GB |
+| **Total** | | | **5 VMs** | | | **12** | **12 GiB** | **110 GB** |
+
+> [!IMPORTANT]
+> **¿Por qué separar SGW-U y PGW-U en 2 VMs?** En la arquitectura CUPS (3GPP TS 23.214), el SGW-U maneja el tráfico S1-U (entre eNodeB y el core) y el S5/S8-U (hacia el PGW-U), mientras que el PGW-U da salida al Internet (interfaz SGi). Separarlos permite:
+> - Medir el consumo de recursos de cada plano de usuario por separado.
+> - Estudiar qué pasa cuando cae el SGW-U vs. el PGW-U.
+> - Demostrar visualmente la arquitectura CUPS del EPC en la topología del EMS.
+
+### Red interna VirtualBox
+
+| Red | Nombre VirtualBox | Subred | Participantes |
+|-----|------------------|--------|---------------|
+| Gestión/S1/S11/S5 | `EMS-LAB-4G` | `10.210.40.0/24` | Las 5 VMs |
+| Pool UEs 4G | — | `10.44.0.0/16` | En la interfaz `ogstun` del PGW-U |
+
+> [!NOTE]
+> La red `EMS-LAB-4G` es **independiente** de la red `EMS-LAB-N4` de Miguel (`10.210.50.0/24`). Ambos testbeds no se ven entre sí, lo que evita cualquier conflicto.
+
+---
+
+## Detalle de Cada VM
+
+### VM 1: `EMS-EPC-CP` — Plano de Control (`10.210.40.1`, SSH 2230)
+
+Aloja todas las funciones del plano de control del EPC, más MongoDB:
+
+| Servicio | Demonio systemd | Interfaces/Protocolos | Escucha en |
+|----------|-----------------|----------------------|------------|
+| MongoDB | `mongod` | TCP 27017 | `127.0.0.1:27017` |
+| HSS | `open5gs-hssd` | Diameter S6a | `127.0.0.1:3868` |
+| PCRF | `open5gs-pcrfd` | Diameter Gx | `127.0.0.1:3869` |
+| MME | `open5gs-mmed` | S1-MME (SCTP), S11 (GTPv2-C), S6a | `10.210.40.1:36412` (SCTP), `10.210.40.1:2123` (S11) |
+| SGW-C | `open5gs-sgwcd` | S11 (GTPv2-C), S5-C (GTPv2-C) | `10.210.40.1:2123` (S11), `10.210.40.1:2123` (S5-C) |
+| PGW-C/SMF | `open5gs-smfd` | S5-C (GTPv2-C), Gx, PFCP (N4) | `10.210.40.1:8805` (PFCP hacia PGW-U) |
+
+> [!NOTE]
+> Open5GS implementa CUPS nativamente: el `smf` actúa como PGW-C y controla al `upf` (PGW-U) mediante PFCP. El `sgwc` controla al `sgwu` también por GTP-C/PFCP. Esto hace posible la separación sin parches.
+
+### VM 2: `EMS-SGW-U` — Serving Gateway User Plane (`10.210.40.2`, SSH 2231)
+
+| Servicio | Demonio systemd | Interfaces | Escucha en |
+|----------|-----------------|------------|------------|
+| SGW-U | `open5gs-sgwud` | S1-U (GTP-U desde eNB), S5/S8-U (GTP-U hacia PGW-U), PFCP (desde SGW-C) | `10.210.40.2:2152` (GTP-U), `10.210.40.2:8805` (PFCP) |
+
+- Recibe el tráfico del eNodeB por S1-U y lo envía al PGW-U por S5/S8-U.
+- No necesita `ogstun` ni NAT; solo tuneliza GTP-U.
+
+### VM 3: `EMS-PGW-U` — PDN Gateway User Plane (`10.210.40.3`, SSH 2232)
+
+| Servicio | Demonio systemd | Interfaces | Escucha en |
+|----------|-----------------|------------|------------|
+| PGW-U/UPF | `open5gs-upfd` | S5/S8-U (GTP-U desde SGW-U), SGi (salida Internet), PFCP (desde PGW-C/SMF) | `10.210.40.3:2152` (GTP-U), `10.210.40.3:8805` (PFCP) |
+
+- Interfaz `ogstun` con IP `10.44.0.1/16` (pool de UEs 4G).
+- NAT Masquerade para dar salida a Internet.
+- Análogo directo al `EMS-UPF-01` de Miguel.
+
+### VM 4: `EMS-ENB` — eNodeB srsRAN (`10.210.40.10`, SSH 2233)
+
+| Servicio | Demonio systemd | Interfaces | Escucha en |
+|----------|-----------------|------------|------------|
+| eNodeB | `srsenb` (o systemd custom) | S1-MME (SCTP hacia MME), S1-U (GTP-U hacia SGW-U), LTE-Uu (ZMQ hacia UE) | `10.210.40.10` |
+
+- Usa **srsRAN 4G** (no UERANSIM).
+- Comunicación radio con el UE mediante **ZeroMQ (ZMQ)** — enlace software sin necesidad de SDR.
+- Archivo de configuración: `/etc/srsran/enb.conf`.
+
+### VM 5: `EMS-UE-4G` — UE LTE (`10.210.40.11`, SSH 2234)
+
+| Servicio | Demonio systemd | Interfaces |
+|----------|-----------------|------------|
+| UE | `srsue` (o systemd custom) | LTE-Uu (ZMQ hacia eNB) |
+
+- Simula un terminal LTE.
+- Al hacer Attach exitoso, crea la interfaz `tun_srsue` con una IP del pool `10.44.0.x`.
+- Archivo de configuración: `/etc/srsran/ue.conf`.
+
+---
+
+## Diagrama de Arquitectura 4G CUPS Distribuido
+
+```mermaid
+graph TB
+    subgraph "VM 5: EMS-UE-4G (10.210.40.11)"
+        UE["srsue<br/>Terminal LTE"]
+    end
+
+    subgraph "VM 4: EMS-ENB (10.210.40.10)"
+        ENB["srsenb<br/>eNodeB"]
+    end
+
+    subgraph "VM 1: EMS-EPC-CP (10.210.40.1)"
+        MME["MME<br/>open5gs-mmed"]
+        HSS["HSS<br/>open5gs-hssd"]
+        PCRF["PCRF<br/>open5gs-pcrfd"]
+        SGWC["SGW-C<br/>open5gs-sgwcd"]
+        PGWC["PGW-C/SMF<br/>open5gs-smfd"]
+        MONGO["MongoDB"]
+        HSS --- MONGO
+        PCRF --- MONGO
+        MME -->|S6a| HSS
+        MME -->|S11| SGWC
+        SGWC -->|S5-C| PGWC
+        PGWC -->|Gx| PCRF
+    end
+
+    subgraph "VM 2: EMS-SGW-U (10.210.40.2)"
+        SGWU["SGW-U<br/>open5gs-sgwud"]
+    end
+
+    subgraph "VM 3: EMS-PGW-U (10.210.40.3)"
+        PGWU["PGW-U/UPF<br/>open5gs-upfd"]
+        INTERNET(("Internet<br/>SGi"))
+    end
+
+    UE <-->|"LTE-Uu (ZMQ)"| ENB
+    ENB -->|"S1-MME (SCTP)"| MME
+    ENB -->|"S1-U (GTP-U)"| SGWU
+    SGWC -.->|"PFCP"| SGWU
+    SGWU <-->|"S5/S8-U (GTP-U)"| PGWU
+    PGWC -.->|"PFCP (N4)"| PGWU
+    PGWU -->|SGi| INTERNET
+```
+
+---
+
+## Cambios Necesarios en el Repositorio
+
+### 1. Catálogo — Actualizar `scenarios.json`
+
+Modificar el escenario `4g-epc` para reflejar los 5 nodos distribuidos:
+
+#### [MODIFY] [scenarios.json](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/catalog/scenarios.json)
+
+- Cambiar nodos de `[epc, enb-vm, ue-vm]` a `[epc-cp, sgwu-vm, pgwu-vm, enb-vm, ue-vm]`.
+- Reasignar `sgwu` a `node_id: "sgwu-vm"` y `upf` (PGW-U) a `node_id: "pgwu-vm"`.
+- Las funciones de control (MME, HSS, PCRF, SGW-C, PGW-C) permanecen en `epc-cp`.
+
+---
+
+### 2. Perfiles — Actualizar `component_profiles.json`
+
+#### [MODIFY] [component_profiles.json](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/catalog/component_profiles.json)
+
+- Agregar `expected_endpoints` a todos los perfiles 4G que actualmente solo tienen `config_paths`.
+- Cambiar las direcciones de `127.0.0.x` a las IPs de la red `10.210.40.x`.
+- Agregar un perfil `4G:sgwu-remote` y `4G:upf-remote` para las VMs remotas.
+
+---
+
+### 3. Configuración — Agregar puertos SSH 4G en `config.py`
+
+#### [MODIFY] [config.py](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/core/config.py)
+
+Agregar las variables de entorno para las VMs 4G:
+
+```python
+# 4G EPC SSH Ports
+epc_cp_ssh_port: int = 2230
+sgwu_ssh_port: int = 2231
+pgwu_ssh_port: int = 2232
+enb_ssh_port: int = 2233
+ue4g_ssh_port: int = 2234
+```
+
+---
+
+### 4. Ejecución Remota — Extender `RemoteExecutionAdapter` en `execution.py`
+
+#### [MODIFY] [execution.py](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/services/execution.py)
+
+El método [`_port_for_unit()`](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/services/execution.py#L324-L333) actualmente solo conoce las unidades 5G. Se debe extender para rutear correctamente las unidades 4G:
+
+```python
+def _port_for_unit(self, unit: str) -> int:
+    # 5G (existente)
+    if unit in ("open5gs-upfd2", "open5gs-upfd-2"):
+        return getattr(self.settings, "upf2_ssh_port", 2224)
+    if unit == "open5gs-upfd":
+        return getattr(self.settings, "upf_ssh_port", 2223)
+    if unit == "ueransim-gnb":
+        return getattr(self.settings, "gnb_ssh_port", 2225)
+    if unit == "ueransim-ue":
+        return getattr(self.settings, "ue_ssh_port", 2226)
+    # 4G (nuevo)
+    if unit == "open5gs-sgwud":
+        return getattr(self.settings, "sgwu_ssh_port", 2231)
+    if unit == "open5gs-upfd-4g":  # alias para PGW-U 4G
+        return getattr(self.settings, "pgwu_ssh_port", 2232)
+    if unit == "srsenb":
+        return getattr(self.settings, "enb_ssh_port", 2233)
+    if unit == "srsue":
+        return getattr(self.settings, "ue4g_ssh_port", 2234)
+    return self.settings.ssh_port
+```
+
+> [!WARNING]
+> **Conflicto crítico con `open5gs-upfd`**: En 5G, `open5gs-upfd` se rutea al puerto 2223 (UPF-01). En 4G, el PGW-U también usa `open5gs-upfd`. Necesitamos un mecanismo para distinguir por **escenario**, no solo por unidad. Opciones:
+> 1. Usar un alias como `open5gs-upfd-4g` en el catálogo 4G y mapearlo en `_remote_unit_name()`.
+> 2. Pasar el `scenario_id` al adapter para resolver el puerto correcto.
+> 
+> **Recomendación**: Opción 2 — pasar `scenario_id` al método `_port_for_unit()` y tener un diccionario de mapeo por escenario.
+
+---
+
+### 5. Scripts de Infraestructura — Crear en `infra/4g/`
+
+Siguiendo la estructura de Miguel, se crearán:
+
+#### [NEW] `infra/4g/create_epc_base_vm.py`
+Script VBoxManage para crear la VM base `EMS-EPC-BASE` con Ubuntu 22.04 Server, que servirá como plantilla para clonar las demás.
+
+#### [NEW] `infra/4g/provision_4g_vms.py`
+Clona la VM base para crear las 5 VMs (EMS-EPC-CP, EMS-SGW-U, EMS-PGW-U, EMS-ENB, EMS-UE-4G) con puertos SSH y IPs asignados.
+
+#### [NEW] `infra/4g/setup_epc_cp.py`
+Configura Open5GS en la VM de control (MME, HSS, PCRF, SGW-C, PGW-C/SMF). Actualiza los YAMLs para que MME escuche en `10.210.40.1`, SMF apunte PFCP a `10.210.40.3`, SGW-C apunte a `10.210.40.2`, etc.
+
+#### [NEW] `infra/4g/setup_sgwu.py`
+Instala y configura `open5gs-sgwud` en la VM 2 con PFCP y GTP-U en `10.210.40.2`.
+
+#### [NEW] `infra/4g/setup_pgwu.py`
+Instala y configura `open5gs-upfd` (PGW-U) en la VM 3 con `ogstun` (`10.44.0.1/16`), PFCP en `10.210.40.3`, NAT masquerade.
+
+#### [NEW] `infra/4g/setup_srsran_enb.py`
+Instala srsRAN, configura `srsenb` apuntando al MME (`10.210.40.1:36412`) y al SGW-U (`10.210.40.2`) por S1-U, con enlace ZMQ.
+
+#### [NEW] `infra/4g/setup_srsran_ue.py`
+Configura `srsue` con enlace ZMQ al eNB, parámetros USIM (IMSI, K, OPc), APN `internet`.
+
+#### [NEW] `infra/4g/final_4g_check.py`
+Script de verificación end-to-end: conectividad SSH, estado de servicios, Attach LTE, ping desde UE hacia Internet.
+
+---
+
+### 6. Whitelist de Archivos Remotos
+
+En [`execution.py`](file:///c:/Users/Sergio/Desktop/TESIS_REPOSITORIO/5g-testbed-management-system/backend/app/services/execution.py), agregar `/etc/srsran/` a la whitelist de `read_remote_file()` para poder leer las configuraciones del eNB y UE desde el EMS.
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Pregunta 1: ¿Tienes acceso a la ISO de Ubuntu Server 22.04.5 que usó Miguel?**
+> Miguel usó la ISO con SHA-256 `9bc6028870aef3f74f4e16b900008179e78b130e6b0b9a140635434a46aa98b0`. Necesitas la misma ISO o una compatible para crear tus VMs base y mantener consistencia de paquetes.
+
+> [!IMPORTANT]
+> **Pregunta 2: ¿Usarás `srsRAN Project` (antes `srsLTE`) o `srsRAN 4G`?**
+> - **srsRAN 4G** (rama `release_23_11`): Solo LTE, más estable y maduro.
+> - **srsRAN Project** (5G NR + LTE): Más pesado, orientado a 5G.
+> 
+> Para tu tesis 4G pura, **srsRAN 4G** es la opción correcta.
+
+> [!IMPORTANT]
+> **Pregunta 3: ¿Quieres que la comunicación eNB↔UE sea por ZMQ o por loopback?**
+> - **ZMQ entre VMs**: Más realista (tráfico cruzando la red virtual), pero requiere compilar srsRAN con soporte ZMQ.
+> - **ZMQ en la misma VM**: Más simple, pero pierde el beneficio de tener VMs separadas.
+> - **Recomendación**: ZMQ entre VMs separadas (`EMS-ENB` y `EMS-UE-4G`), con `tx_port` y `rx_port` apuntando entre las IPs `10.210.40.10` y `10.210.40.11`.
+
+> [!WARNING]
+> **Pregunta 4: Conflicto de unidades `open5gs-upfd` entre escenarios.**
+> El PGW-U de 4G y el UPF de 5G usan el mismo nombre de demonio (`open5gs-upfd`). ¿Prefieres:
+> - **(A)** Resolver por escenario pasando `scenario_id` al `RemoteExecutionAdapter` — más limpio.
+> - **(B)** Usar un alias en el catálogo (`open5gs-upfd-4g`) con mapeo en `_remote_unit_name()` — más rápido de implementar.
+
+---
+
+## Fases de Implementación
+
+| Fase | Duración | Trabajo | Entregable |
+|------|----------|---------|------------|
+| **F0 — VM Base** | 1 semana | Crear VM base Ubuntu 22.04, instalar Open5GS `2.8.0~jammy5`, snapshot `base-4g` | VM base funcional con snapshot |
+| **F1 — Clonación y Red** | 1 semana | Clonar 5 VMs, asignar IPs/puertos SSH, validar ping entre VMs | 5 VMs comunicándose por `EMS-LAB-4G` |
+| **F2 — Plano de Control** | 1–2 semanas | Configurar MME, HSS, PCRF, SGW-C, PGW-C/SMF en `EMS-EPC-CP`. Probar que los servicios arranquen y se conecten entre sí (Diameter, GTPv2-C) | Servicios de control activos, logs sin errores |
+| **F3 — Plano de Usuario Distribuido** | 1–2 semanas | Configurar SGW-U en VM 2, PGW-U en VM 3. Verificar asociación PFCP con el plano de control. Configurar `ogstun` y NAT en PGW-U | PFCP associations UP, `ogstun` con IP `10.44.0.1` |
+| **F4 — RAN srsRAN** | 1–2 semanas | Instalar srsRAN 4G en VMs 4 y 5. Configurar ZMQ, S1-MME, S1-U. Lograr primer Attach LTE exitoso | UE registrado, bearer establecido, ping a Internet |
+| **F5 — Integración EMS** | 1–2 semanas | Actualizar catálogo, `config.py`, `execution.py`, whitelist. Verificar que el dashboard, topología, operaciones y trazas funcionen para `4g-epc` en modo remoto | EMS gestionando el testbed 4G distribuido |
+| **F6 — Validación y Experimentos** | 1–2 semanas | Pruebas de Attach/Detach, handover (si aplica), falla de SGW-U, falla de PGW-U, capturas PCAP, medición de KPIs | Evidencia reproducible para la tesis |
+
+**Total estimado: 6–10 semanas efectivas.**
+
+---
+
+## Verificación
+
+### Automated Tests
+```bash
+# Backend unit tests existentes
+cd backend && python -m pytest tests/ -v
+
+# Health check de las 5 VMs 4G
+python infra/4g/final_4g_check.py
+```
+
+### Manual Verification
+1. Desde el UE (`EMS-UE-4G`), ejecutar `srsue` y verificar Attach exitoso.
+2. Hacer `ping -I tun_srsue 8.8.8.8` desde el UE y verificar conectividad E2E.
+3. En el dashboard del EMS (`http://localhost:8080`), cambiar a escenario `4g-epc` y verificar que todos los componentes aparezcan en verde.
+4. Ejecutar una captura de trazas desde el EMS sobre la interfaz S1-MME y verificar que se capturan mensajes SCTP/S1AP.
